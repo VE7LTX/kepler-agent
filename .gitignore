@@ -1,0 +1,27 @@
+﻿# PowerShell / Windows
+*.psd1
+*.psm1
+*.ps1xml
+
+# Logs
+*.log
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Build / temp
+bin/
+obj/
+out/
+*.tmp
+*.bak
+
+# Secrets
+.env
+.env.*
+
+# Local caches
+*.cache
