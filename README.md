@@ -4,10 +4,11 @@ A local PowerShell automation agent that plans tasks, validates actions, and exe
 
 ## What it does
 - Plans in short iterations and rejects invalid plans (invalid JSON, bad actions, bad paths).
-- Shows a brief thinking summary and confidence score before execution.
+- Shows a brief thinking summary and a WHO/WHAT/WHEN/WHERE/WHY goal restatement before execution.
 - Uses a restricted action set to operate only inside `C:\agent\`.
 - Logs planning attempts, rejections, and model output to `C:\agent\agent-debug.log`.
 - Repairs invalid JSON output and retries planning when possible.
+- Escalates to stronger planner models after repeated failures.
 
 ## Action Model
 All actions are single-line strings in the plan. Multi-file tasks use `FOR_EACH` or `BUILD_REPORT`.
@@ -62,6 +63,11 @@ All actions are single-line strings in the plan. Multi-file tasks use `FOR_EACH`
 - Plan approval is required; low-confidence plans require extra confirmation.
 - Goals are sanitized to avoid chain-of-thought requests.
 - Invalid JSON or action formats are rejected and logged.
+
+## Planning Behavior
+- Goal restatement is generated before approval.
+- Recent failures are carried into the next planning attempt to avoid repeated mistakes.
+- Planner escalation after 3 rejects: `phi3-4k` → `phi3:latest` → `codellama:7b-instruct-8k`.
 
 ## Debugging
 - Logs to `C:\agent\agent-debug.log`.
