@@ -86,6 +86,8 @@ $EnableSpinner = $true
 $RootDir = "C:\agent\"
 $LastModelError = $null
 $ModelRetryDelaySeconds = 8
+$AgentName = "Kepler"
+$AgentBackstory = "Kepler is a local Ollama-powered agent orchestrated by a PowerShell runner. It plans in strict JSON, validates actions, and executes only within C:\\agent\\ with human approval."
 
 # ------------------ GOAL ------------------
 $OriginalGoal = Read-Host "Enter goal"
@@ -148,6 +150,10 @@ function Build-GoalRestatement {
 @"
 Summarize the goal into WHO/WHAT/WHEN/WHERE/WHY as short bullet points.
 Return plain text only, 4-6 bullets, no chain-of-thought.
+
+AGENT IDENTITY:
+- Name: $AgentName
+- Backstory: $AgentBackstory
 
 GOAL:
 $Text
@@ -593,7 +599,8 @@ Rules:
 - {item} expands to a full absolute path from LIST_DIR/FIND_FILES. Do not treat it as a basename.
 - REPEAT index is zero-based. Use {index} or {index:03d} for padding.
 - Avoid destructive commands.
-- Use absolute Windows paths or workspace-relative paths under C:\agent only.
+- Use PowerShell-native commands only; avoid sh, bash, seq, xargs, grep, awk, sed, cut, head, tail.
+- Use absolute Windows paths or workspace-relative paths under C:\agent only.   
 - Do not use placeholders like "<path>" or "/path/to/...".
 - Do not use Unix-style paths (e.g., /home/user).
 - WRITE_FILE spec must be actual intended file contents or clear instructions, not metadata like "text/plain".
@@ -617,6 +624,10 @@ $failureNotes
 $badOutputNotes
 $hintNotes
 $userNotes
+
+AGENT IDENTITY:
+Name: $AgentName
+Backstory: $AgentBackstory
 
 GOAL_RESTATEMENT:
 $goalNotes
@@ -1017,6 +1028,11 @@ while ($true) {
         }
         if ($p.action -match '^RUN_COMMAND\|') {
             $cmd = $p.action.Substring("RUN_COMMAND|".Length)
+            if ($cmd -match '(?i)\b(sh|bash|zsh|seq|xargs|grep|awk|sed|cut|head|tail)\b') {
+                $pathsValid = $false
+                $pathRejectDetail = "RUN_COMMAND_UNSUPPORTED: use PowerShell-native commands only."
+                break
+            }
             $absPaths = [regex]::Matches($cmd, '[A-Za-z]:\\[^"\\s]+')
             foreach ($m in $absPaths) {
                 if ($RequireRootPath -and ($m.Value -notmatch ('^(?i)' + [regex]::Escape($RequireRootPath)))) {
@@ -1805,6 +1821,11 @@ $Action
 # ------------------ RUN COMMAND ------------------
 function Run-Command {
     param([string]$Command)
+
+    if ($Command -match '(?i)\b(sh|bash|zsh|seq|xargs|grep|awk|sed|cut|head|tail)\b') {
+        Write-Host "[RUNNER] Blocked non-PowerShell command: $Command"
+        return
+    }
 
     $absPaths = [regex]::Matches($Command, '[A-Za-z]:\\[^"\\s]+')
     foreach ($m in $absPaths) {

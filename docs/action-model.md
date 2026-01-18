@@ -12,6 +12,7 @@ The planner can only emit actions from a fixed list. Each action is a single-lin
 - `APPEND_FILE|<path>|<text>`: Append text to an existing file.
 - `WRITE_PATCH|<path>|<diff>`: Apply a unified diff (via `git apply` or `patch`).
 - `RUN_COMMAND|<command>`: Run a command. Any paths must stay under `C:\agent\`.
+  - Use PowerShell-native commands only. Unix tools (sh, bash, seq, xargs, grep, awk, sed, cut, head, tail) are blocked.
 
 ## Looping and Batch Actions
 - `FOR_EACH|<list_key>|<action_template>`

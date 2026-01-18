@@ -1,4 +1,4 @@
-﻿# Kepler Agent
+# Kepler Agent
 
 A local PowerShell automation agent that plans tasks, validates actions, and executes within a bounded directory with user-visible summaries and logs.
 
@@ -33,3 +33,4 @@ A local PowerShell automation agent that plans tasks, validates actions, and exe
 ## Notes
 - Uses local Ollama models for planning and writing.
 - Review proposed plans and outputs; model output can still be wrong.
+

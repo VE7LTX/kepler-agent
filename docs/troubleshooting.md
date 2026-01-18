@@ -27,6 +27,10 @@ This section lists common failures, why they happen, and what to check.
   - The planner rotates through fallbacks after rejects or errors.
   - Fix: pull the fallback models and ensure they are available.
 
+- **RUN_COMMAND blocked**
+  - The plan used Unix shell tools (e.g., `sh`, `seq`, `xargs`).
+  - Fix: use PowerShell-native commands instead.
+
 - **Long delays**
   - Larger models can take 30-90 seconds per planning call.
   - Fix: use smaller models or reduce `PlannerPredict` in `agent.ps1`.

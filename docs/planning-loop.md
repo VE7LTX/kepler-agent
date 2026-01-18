@@ -12,6 +12,7 @@ The planner receives a strict JSON template and a fixed action schema. The promp
 - Recent rejection reasons
 - The last rejected output (truncated)
 - User feedback from any declined step
+- Agent identity (name and backstory) to anchor WHO/WHAT/WHY
 
 ## 3) Planner Output Requirements
 - Output must be valid JSON inside `<json>...</json>` tags.
@@ -42,6 +43,9 @@ A smaller model is used when reliability is better than raw size.
 ## 6) Failure Memory
 Recent failures are fed back into the next prompt. The last rejected output and the rejection reason are included to help the planner avoid repeating the same mistake.
 
+## 6a) Failure Reflection (fast model)
+After a rejection, a fast model generates a short diagnostic with concrete fix hints. These hints are injected into the next planner prompt as `RETRY_HINTS` and are shown to the user.
+
 ## 7) Approval and Execution
 Once a plan passes validation, the agent shows:
 - The plan steps
@@ -55,6 +59,8 @@ The user approves once for the whole plan and chooses:
 - cancel
 
 If a step is declined, the agent asks why, saves the feedback, and replans.
+
+Between steps, a fast pre-check summary is shown to the user so issues can be spotted early.
 
 ## 8) Timing and Logs
 - Planner response time is printed each iteration.

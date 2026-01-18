@@ -34,6 +34,8 @@
 - Add rejection subcodes in logs (PATH_TRAVERSAL, PLACEHOLDER_MISUSE, NONEXISTENT_BASE). (done)
 - Inject specific failure guidance instead of generic “Invalid path” (e.g., why and how to fix). (done)
 - Log plan diffs between iterations (what changed and why). (done)
+- Add fast failure reflection before retries and surface output to user. (done)
+- Add pre-step check summaries between actions. (done)
 
 ## Example Plan (for reference)
 - CREATE_DIR|C:\agent\new000

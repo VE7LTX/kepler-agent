@@ -9,6 +9,8 @@ All settings live near the top of `agent.ps1`. These control model selection, ti
 - `WriterModel`: Default writer model for `WRITE_FILE` output.
 - `WriterFallbacks`: Models used if the writer output is too short.
 - `GoalSummaryModel`: Fast model used to generate the WHO/WHAT/WHEN/WHERE/WHY restatement.
+- `FailureReflectModel`: Fast model used to generate retry hints after rejects.
+- `StepCheckModel`: Fast model used for pre-step checks.
 
 ## Model Options
 - `PlannerNumCtx`, `PlannerPredict`, `PlannerTemp`: Planner token window, output limit, temperature.
@@ -30,6 +32,8 @@ All settings live near the top of `agent.ps1`. These control model selection, ti
 - `DebugLogPretty`: If true, log in multi-line format.
 - `RequireJsonTags`: Reject plans not wrapped in `<json>...</json>` tags.
 - `EnableSpinner`: Show a spinner while models are running.
+- `EnableFailureReflection`: Toggle fast failure reflection output.
+- `EnableStepChecks`: Toggle pre-step checks between actions.
 
 ## Timing / Retry
 - `ModelRetryDelaySeconds`: Delay before retrying a failed model call.
@@ -37,3 +41,7 @@ All settings live near the top of `agent.ps1`. These control model selection, ti
 
 ## Root
 - `RootDir`: Root directory constraint. All paths and file operations must stay under this path.
+
+## Identity
+- `AgentName`: Name used in prompts and goal restatements.
+- `AgentBackstory`: Short description of what the agent is and how it operates.
