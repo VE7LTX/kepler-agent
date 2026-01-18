@@ -29,7 +29,7 @@ $ErrorActionPreference = "Stop"
 
 # ------------------ CONFIG ------------------
 $PlannerModel = "qwen2:7b-instruct"
-$WriterModel  = "codellama:13b-instruct"
+$WriterModel  = "codellama:7b-instruct"
 
 $PlannerNumCtx   = 4096
 $PlannerPredict  = 900
@@ -51,6 +51,8 @@ $PlannerFallbacks = @(
 $PlannerFallbackIndex = 0
 $PlannerRejectStreak = 0
 $EscalateAfterRejects = 2
+$PlannerFirstPassModel = "codellama:13b-instruct"
+$GoalSummaryModel = "qwen2:7b-instruct"
 
 $EffectiveMaxIterations = $MaxPlanIterations
 if ($EffectiveMaxIterations -le 0) { $EffectiveMaxIterations = [int]::MaxValue }
@@ -58,6 +60,11 @@ if ($EffectiveMaxIterations -le 0) { $EffectiveMaxIterations = [int]::MaxValue }
 $ConfirmOncePerTask  = $true
 $ConfirmRiskyActions = $true
 $ConfirmLowConfidence = $true
+
+$WriterFallbacks = @(
+    "codellama:7b-instruct",
+    "codellama:13b-instruct"
+)
 
 $OllamaTagsApi = "http://localhost:11434/api/tags"
 $OllamaGenApi  = "http://localhost:11434/api/generate"
@@ -69,6 +76,7 @@ $DebugLogPretty = $true
 $RequireJsonTags = $true
 $EnableSpinner = $true
 $RootDir = "C:\agent\"
+$LastModelError = $null
 
 # ------------------ GOAL ------------------
 $OriginalGoal = Read-Host "Enter goal"
@@ -127,7 +135,7 @@ function Get-GoalSummary {
     Log-Debug-Raw -Label "Goal restatement prompt" -Text $promptText
     if (Get-Command Invoke-Ollama-Spinner -ErrorAction SilentlyContinue) {
         $summary = Invoke-Ollama-Spinner `
-            -Model $PlannerModel `
+            -Model $GoalSummaryModel `
             -Prompt $promptText `
             -System "Return plain text only." `
             -Options @{
@@ -138,7 +146,7 @@ function Get-GoalSummary {
             -Label "Goal summary"
     } else {
         $body = @{
-            model   = $PlannerModel
+            model   = $GoalSummaryModel
             prompt  = $promptText
             system  = "Return plain text only."
             options = @{
@@ -296,7 +304,11 @@ function Invoke-Ollama-Spinner {
         $result = Receive-Job -Job $job -ErrorAction Stop
     } catch {
         Remove-Job -Job $job -Force | Out-Null
-        throw
+        $msg = $_.Exception.Message
+        $script:LastModelError = $msg
+        Write-Host "[AGENT] Model call failed: $msg"
+        Log-Debug ("Model call failed: {0}" -f $msg)
+        return $null
     }
     Remove-Job -Job $job -Force | Out-Null
     $result
@@ -420,6 +432,10 @@ function Build-PlanPrompt {
     if ($script:LastBadOutput) {
         $badOutputNotes = "BAD_OUTPUT:`n" + (Truncate-Text -Text $script:LastBadOutput -Max 2000) + "`nWHY_REJECTED:`n" + $script:LastRejectReason
     }
+    $goalNotes = ""
+    if ($GoalRestatement) {
+        $goalNotes = ($GoalRestatement -join "`n")
+    }
 @"
 Return JSON ONLY inside <json>...</json> tags. Do not output anything outside the tags.
 Use the exact template and fill in values. Do not add keys.
@@ -494,6 +510,9 @@ Rules:
 $failureNotes
 $badOutputNotes
 
+GOAL_RESTATEMENT:
+$goalNotes
+
 GOAL:
 $Goal
 "@
@@ -513,7 +532,11 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
     Log-Debug "Planning iteration $i"
     Log-Debug "-----"
 
-    if ($PlannerRejectStreak -ge $EscalateAfterRejects -and $PlannerFallbackIndex -lt ($PlannerFallbacks.Count - 1)) {
+    if ($i -eq 1 -and $PlannerFirstPassModel) {
+        $PlannerModel = $PlannerFirstPassModel
+        Write-Host "[AGENT] Planner first-pass model: $PlannerModel"
+        Log-Debug "Planner first-pass model: $PlannerModel"
+    } elseif ($PlannerRejectStreak -ge $EscalateAfterRejects -and $PlannerFallbackIndex -lt ($PlannerFallbacks.Count - 1)) {
         $PlannerFallbackIndex++
         $PlannerRejectStreak = 0
         $PlannerModel = $PlannerFallbacks[$PlannerFallbackIndex].name
@@ -539,6 +562,23 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
     $planSw.Stop()
     Write-Host ("[AGENT] Planner response time: {0:N2}s" -f $planSw.Elapsed.TotalSeconds)
     Log-Debug ("Planner response time: {0:N2}s" -f $planSw.Elapsed.TotalSeconds)
+    if (-not $raw) {
+        Write-Host "[AGENT] Reject: planner call failed"
+        Log-Debug "Reject: planner call failed"
+        Add-Failure "Planner call failed"
+        Set-LastReject -Reason "Planner call failed" -BadOutput ""
+        $PlannerRejectStreak++
+        if ($script:LastModelError -match '(?i)cuda|oom|out of memory') {
+            if ($PlannerFallbackIndex -lt ($PlannerFallbacks.Count - 1)) {
+                $PlannerFallbackIndex++
+                $PlannerModel = $PlannerFallbacks[$PlannerFallbackIndex].name
+                $PlannerTemp = $PlannerFallbacks[$PlannerFallbackIndex].temp
+                Write-Host "[AGENT] Switching planner model after error to $PlannerModel"
+                Log-Debug "Switching planner model after error to $PlannerModel"
+            }
+        }
+        continue
+    }
     Log-Debug-Raw -Label "Planner raw" -Text $raw
 
     $rawClean = Strip-JsonFences -Text $raw
@@ -794,6 +834,26 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
                 $pathsValid = $false
                 break
             }
+            $tmplParts = $tmpl.Split('|',4)
+            $tmplAction = $tmplParts[0]
+            $pathIdx = 1
+            if ($tmplAction -eq "SEARCH_TEXT") { $pathIdx = 2 }
+            if ($tmplParts.Length -gt $pathIdx) {
+                $tmplPath = $tmplParts[$pathIdx]
+                $tmplPath = [regex]::Replace($tmplPath, "\{index(:0+\d+d)?\}", "0")
+                if ($tmplPath -match '<path>|/path/to' -or $tmplPath -match '^(?i)/home/|^/|\\?/') {
+                    $pathsValid = $false
+                    break
+                }
+                if ($tmplPath -notmatch '^(?i)[A-Za-z]:\\|^\\\\|^\\.|^\\.\\') {
+                    $pathsValid = $false
+                    break
+                }
+                if ($RequireRootPath -and ($tmplPath -notmatch ('^(?i)' + [regex]::Escape($RequireRootPath)))) {
+                    $pathsValid = $false
+                    break
+                }
+            }
         }
         if ($p.action -match '^RUN_COMMAND\|') {
             $cmd = $p.action.Substring("RUN_COMMAND|".Length)
@@ -908,10 +968,12 @@ function Write-File {
         } | Out-String)
     }
 
-    $content = Invoke-Ollama-Spinner `
-        -Model $WriterModel `
-        -System "Write ONLY the file contents described in SPEC. Do not output commands, prompts, markdown fences, or explanations." `
-        -Prompt @"
+    $content = $null
+    foreach ($wm in $WriterFallbacks) {
+        $content = Invoke-Ollama-Spinner `
+            -Model $wm `
+            -System "Write ONLY the file contents described in SPEC. Do not output commands, prompts, markdown fences, or explanations." `
+            -Prompt @"
 GOAL:
 $Goal
 
@@ -922,12 +984,17 @@ SPEC:
 $Spec
 $contextText
 "@ `
-        -Options @{
-            num_ctx     = $WriterNumCtx
-            num_predict = $WriterPredict
-            temperature = $WriterTemp
-        } `
-        -Label "Writer"
+            -Options @{
+                num_ctx     = $WriterNumCtx
+                num_predict = $WriterPredict
+                temperature = $WriterTemp
+            } `
+            -Label "Writer"
+
+        if ($content -and $content.Trim().Length -ge 10) {
+            break
+        }
+    }
 
     $clean = $content -replace '^\s*```.*?\n','' -replace '\n```$',''
     $clean | Out-File -FilePath $Path -Encoding utf8 -Force
