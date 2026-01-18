@@ -28,7 +28,7 @@ if (-not $IsAdmin) {
 $ErrorActionPreference = "Stop"
 
 # ------------------ CONFIG ------------------
-$PlannerModel = "phi3-4k"
+$PlannerModel = "qwen2:7b-instruct"
 $WriterModel  = "codellama:13b-instruct"
 
 $PlannerNumCtx   = 4096
@@ -43,7 +43,6 @@ $MaxPlanIterations = 0
 $MaxPlanMinutes    = 0
 $RequireConfidence = 0.75
 $PlannerFallbacks = @(
-    @{ name = "phi3-4k"; temp = 0.0 },
     @{ name = "qwen2:7b-instruct"; temp = 0.0 },
     @{ name = "mistral:7b-instruct"; temp = 0.0 },
     @{ name = "deepseek-coder:6.7b-instruct"; temp = 0.0 },
