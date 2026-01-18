@@ -170,6 +170,22 @@ function Add-Failure {
     }
 }
 
+function Set-LastReject {
+    param(
+        [string]$Reason,
+        [string]$BadOutput
+    )
+    $script:LastRejectReason = $Reason
+    $script:LastBadOutput = $BadOutput
+}
+
+function Truncate-Text {
+    param([string]$Text, [int]$Max)
+    if (-not $Text) { return $Text }
+    if ($Text.Length -le $Max) { return $Text }
+    $Text.Substring(0, $Max) + "...[truncated]"
+}
+
 
 # ------------------ GOAL SANITIZER ------------------
 function Sanitize-Goal {
@@ -190,6 +206,8 @@ $RequireRootPath = $RootDir
 Log-Debug "RequireRootPath: $RequireRootPath"
 $FailureMemory = New-Object System.Collections.Generic.List[string]
 $GoalRestatement = Get-GoalSummary
+$LastBadOutput = $null
+$LastRejectReason = $null
 
 # ------------------ OLLAMA WAIT ------------------
 function Wait-ForOllama {
@@ -398,6 +416,10 @@ function Build-PlanPrompt {
     if ($FailureMemory.Count -gt 0) {
         $failureNotes = "Recent failures to avoid:`n- " + ($FailureMemory -join "`n- ")
     }
+    $badOutputNotes = ""
+    if ($script:LastBadOutput) {
+        $badOutputNotes = "BAD_OUTPUT:`n" + (Truncate-Text -Text $script:LastBadOutput -Max 2000) + "`nWHY_REJECTED:`n" + $script:LastRejectReason
+    }
 @"
 Return JSON ONLY inside <json>...</json> tags. Do not output anything outside the tags.
 Use the exact template and fill in values. Do not add keys.
@@ -470,6 +492,7 @@ Rules:
 - FOR_EACH example: FOR_EACH|FIND:*.ps1|READ_PART|{item}|1|40
 - REPEAT example: REPEAT|3|CREATE_DIR|C:\\agent\\new{index:03d}
 $failureNotes
+$badOutputNotes
 
 GOAL:
 $Goal
@@ -527,6 +550,7 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
         Write-Host "[AGENT] Reject: no JSON detected"
         Log-Debug "Reject: no JSON detected"
         Add-Failure "No JSON detected"
+        Set-LastReject -Reason "No JSON detected" -BadOutput $rawClean
         $PlannerRejectStreak++
         continue
     }
@@ -537,6 +561,7 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
         Write-Host "[AGENT] Reject: invalid JSON"
         Log-Debug "Reject: invalid JSON"
         Add-Failure "Invalid JSON"
+        Set-LastReject -Reason "Invalid JSON" -BadOutput $rawClean
         $PlannerRejectStreak++
         $repaired = Repair-Json -Text $rawClean
         Log-Debug-Raw -Label "Planner repaired" -Text $repaired
@@ -649,6 +674,10 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
             $p | Add-Member -NotePropertyName expects -NotePropertyValue "string" -Force
             $normalizedActions = $true
         }
+        if ($p.action -notmatch '^FOR_EACH\|' -and $p.action -match '\{item\}') {
+            $allActionsValid = $false
+            break
+        }
         if ($p.action -notmatch '^(READ_FILE|READ_PART|WRITE_FILE|APPEND_FILE|WRITE_PATCH|RUN_COMMAND|LIST_DIR|FIND_FILES|SEARCH_TEXT|FOR_EACH|REPEAT|BUILD_REPORT|CREATE_DIR|DELETE_FILE|DELETE_DIR|MOVE_ITEM|COPY_ITEM|RENAME_ITEM|VERIFY_PATH)\|') {
             $allActionsValid = $false
             break
@@ -664,6 +693,7 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
         Log-Debug "Reject: invalid action format"
         $candidate.plan | ForEach-Object { Log-Debug ("Action: {0}" -f $_.action) }
         Add-Failure "Invalid action format or extra fields"
+        Set-LastReject -Reason "Invalid action format or extra fields" -BadOutput $rawClean
         $PlannerRejectStreak++
         continue
     }
@@ -760,7 +790,7 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
                 $pathsValid = $false
                 break
             }
-            if ($tmpl -notmatch '\{index\}') {
+            if ($tmpl -notmatch '\{index(:0+\d+d)?\}') {
                 $pathsValid = $false
                 break
             }
@@ -783,6 +813,7 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
         Log-Debug "Reject: invalid path"
         $candidate.plan | ForEach-Object { Log-Debug ("Action: {0}" -f $_.action) }
         Add-Failure "Invalid path"
+        Set-LastReject -Reason "Invalid path" -BadOutput $rawClean
         $PlannerRejectStreak++
         continue
     }
@@ -807,6 +838,7 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
         Log-Debug "Reject: invalid WRITE_FILE spec"
         $candidate.plan | ForEach-Object { Log-Debug ("Action: {0}" -f $_.action) }
         Add-Failure "Invalid WRITE_FILE spec"
+        Set-LastReject -Reason "Invalid WRITE_FILE spec" -BadOutput $rawClean
         $PlannerRejectStreak++
         continue
     }
