@@ -77,6 +77,7 @@ $RequireJsonTags = $true
 $EnableSpinner = $true
 $RootDir = "C:\agent\"
 $LastModelError = $null
+$ModelRetryDelaySeconds = 8
 
 # ------------------ GOAL ------------------
 $OriginalGoal = Read-Host "Enter goal"
@@ -568,6 +569,8 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
         Add-Failure "Planner call failed"
         Set-LastReject -Reason "Planner call failed" -BadOutput ""
         $PlannerRejectStreak++
+        Write-Host "[AGENT] Waiting $ModelRetryDelaySeconds seconds before retry..."
+        Start-Sleep -Seconds $ModelRetryDelaySeconds
         if ($script:LastModelError -match '(?i)cuda|oom|out of memory') {
             if ($PlannerFallbackIndex -lt ($PlannerFallbacks.Count - 1)) {
                 $PlannerFallbackIndex++

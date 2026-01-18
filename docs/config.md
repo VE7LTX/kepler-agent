@@ -6,6 +6,8 @@ Key settings live near the top of `agent.ps1`.
 - `PlannerModel`
 - `WriterModel`
 - `PlannerFallbacks`
+- `PlannerFirstPassModel`
+- `GoalSummaryModel`
 
 ## Limits
 - `MaxPlanIterations` (0 = unlimited)
@@ -22,6 +24,9 @@ Key settings live near the top of `agent.ps1`.
 - `DebugLogPretty`
 - `RequireJsonTags`
 - `EnableSpinner`
+
+## Timing / Retry
+- `ModelRetryDelaySeconds`
 
 ## Root
 - `RootDir` constrains all file and path actions.

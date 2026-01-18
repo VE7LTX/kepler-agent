@@ -12,7 +12,12 @@
 
 ## Failure Memory
 - Recent failures are injected into the next planning prompt to avoid repeating mistakes.
+- Last bad output is attached to the next prompt with a rejection reason.
 
 ## Timing
 - Planner response time is printed each iteration.
 - Each execution step prints elapsed time.
+
+## Model Failures
+- On model call failure, the agent waits a few seconds and retries.
+- CUDA/OOM errors trigger a fallback to smaller models.

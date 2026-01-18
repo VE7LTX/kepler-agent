@@ -12,6 +12,7 @@ A local PowerShell automation agent that plans tasks, validates actions, and exe
 - Uses a strict JSON template wrapped in `<json>...</json>` tags.
 - Prints per-step timing and planner response time to show when larger models take longer.
 - Shows a spinner while model calls are running.
+- Waits briefly and retries after model call failures.
 
 ## Docs
 - [Quickstart](docs/quickstart.md): First-time setup (Ollama install, model pulls, run steps).
