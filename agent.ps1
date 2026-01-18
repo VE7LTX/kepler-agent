@@ -581,7 +581,7 @@ function Build-PlanPrompt {
         "Plan should be minimal and ordered.",
         "Use absolute Windows paths or workspace-relative paths under C:\\agent only.",
         "Do not use Unix-style paths (e.g., /home/user).",
-        "Do not use placeholders like \"<path>\" or \"/path/to/...\".",
+        "Do not use placeholders like <path> or /path/to/... .",
         "Do NOT use parent traversal (e.g., {item}\\.. or ..) in any path.",
         "Actions must be single-line; if content needs newlines, use \\n escapes in the spec.",
         "Each plan item must have only: step, action, expects.",
@@ -660,79 +660,6 @@ Schema:
 Rules:
 - $rulesText
 
-$failureNotes
-$badOutputNotes
-$hintNotes
-$userNotes
-
-AGENT IDENTITY:
-Name: $AgentName
-Backstory: $AgentBackstory
-
-GOAL_RESTATEMENT:
-$goalNotes
-
-GOAL:
-$Goal
-"@
-}
-</json>
-
-Schema:
-{
-  "goal": "string",
-  "thinking_summary": ["string"],
-  "reflection": {
-    "issues_found": ["string"],
-    "changes_made": ["string"],
-    "confidence": 0.0
-  },
-  "ready": true,
-  "plan": [
-    {
-      "step": 1,
-      "action": "READ_FILE|<path> or READ_PART|<path>|<start>|<count> or WRITE_FILE|<path>|<spec> or APPEND_FILE|<path>|<text> or WRITE_PATCH|<path>|<diff> or RUN_COMMAND|<command> or LIST_DIR|<path> or FIND_FILES|<glob> or SEARCH_TEXT|<pattern>|<path> or FOR_EACH|<list_key>|<action_template> or REPEAT|<count>|<action_template> or BUILD_REPORT|<glob>|<start>|<count>|<outpath>|<patterns> or CREATE_DIR|<path> or DELETE_FILE|<path> or DELETE_DIR|<path> or MOVE_ITEM|<src>|<dest> or COPY_ITEM|<src>|<dest> or RENAME_ITEM|<src>|<dest> or VERIFY_PATH|<path>",
-      "expects": "string"
-    }
-  ]
-}
-
-Rules:
-- Provide a brief thinking_summary (2-4 short bullets). Do NOT include chain-of-thought.
-- Plan should be minimal and ordered.
-- Prefer LIST_DIR or FIND_FILES to discover files, then READ_FILE/READ_PART before WRITE_FILE when editing an existing file.
-- For multi-file tasks, use FOR_EACH with a list key from LIST_DIR or FIND_FILES.
-- For fixed-count tasks (e.g., create N items), use REPEAT.
-- Creation must be explicit. Do NOT use FOR_EACH to create new directories or files.
-- FOR_EACH may only operate on existing files or directories discovered earlier in the plan.
-- Do NOT combine discovery (FIND_FILES/LIST_DIR) with creation of new entities in the same step.
-- Do NOT use parent traversal (e.g., {item}\.. or ..) in any path.
-- If the count is small and fixed, write explicit CREATE_DIR/WRITE_FILE steps.
-- {item} expands to a full absolute path from LIST_DIR/FIND_FILES. Do not treat it as a basename.
-- REPEAT index is zero-based. Use {index} or {index:03d} for padding.
-- Avoid destructive commands.
-- Use PowerShell-native commands only; avoid sh, bash, seq, xargs, grep, awk, sed, cut, head, tail.
-- Do NOT invent cmdlets. If you need computation, write explicit PowerShell expressions inside RUN_COMMAND.
-- Use absolute Windows paths or workspace-relative paths under C:\agent only.   
-- Do not use placeholders like "<path>" or "/path/to/...".
-- Do not use Unix-style paths (e.g., /home/user).
-- WRITE_FILE spec must be actual intended file contents or clear instructions, not metadata like "text/plain".
-- Actions must be single-line; if content needs newlines, use \n escapes in the spec.
-- Output must be valid JSON with no stray text, extra numbers, or trailing commas.
-- Do not include raw newlines inside action strings; use \\n escapes only.
-- Escape quotes inside action strings with \\\".
-- Each plan item must have only: step, action, expects.
-- Respect any directory constraints explicitly stated in the goal.
-- Allowed actions only: READ_FILE, READ_PART, WRITE_FILE, APPEND_FILE, WRITE_PATCH, RUN_COMMAND, LIST_DIR, FIND_FILES, SEARCH_TEXT, FOR_EACH, REPEAT, BUILD_REPORT, CREATE_DIR, DELETE_FILE, DELETE_DIR, MOVE_ITEM, COPY_ITEM, RENAME_ITEM, VERIFY_PATH. Do not invent new action types.
-- Do not invent control flow (GOTO/IF/LOOP). Use FOR_EACH only.
-- Only use {item} and {index} placeholders inside FOR_EACH action templates.
-- FOR_EACH format must be exactly: FOR_EACH|<list_key>|<action_template>.
-- list_key must be "FIND:<glob>" or "DIR:<path>".
-- FIND_FILES takes only a glob (no paths).
-- REPEAT format must be exactly: REPEAT|<count>|<action_template>.
-- BUILD_REPORT example: BUILD_REPORT|*.ps1|1|40|C:\\agent\\ps1-report.txt|RUN_COMMAND,Write-File
-- FOR_EACH example: FOR_EACH|FIND:*.ps1|READ_PART|{item}|1|40
-- REPEAT example: REPEAT|3|CREATE_DIR|C:\\agent\\new{index:03d}
 $failureNotes
 $badOutputNotes
 $hintNotes
@@ -2041,6 +1968,8 @@ if ($script:ReplanRequested) {
 break
 }
 Write-Host "`n[AGENT] Done."
+
+
 
 
 
