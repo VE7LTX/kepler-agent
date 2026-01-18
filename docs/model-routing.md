@@ -27,6 +27,10 @@ The writer only needs to produce file content. A small model is usually enough a
 - If a model call fails, the agent waits briefly and tries the next fallback.
 - CUDA or out-of-memory errors are common on larger models. Smaller fallbacks are more reliable on limited GPUs.
 
+## Fast Checks (smallest models)
+- Failure reflection: `phi3:mini`
+- Pre-step checks: `phi3:mini`
+
 ## Pulling Models
 The agent does not pull models automatically. Ensure these are installed:
 ```powershell

@@ -53,6 +53,10 @@ $PlannerRejectStreak = 0
 $EscalateAfterRejects = 2
 $PlannerFirstPassModel = "codellama:13b-instruct"
 $GoalSummaryModel = "qwen2:7b-instruct"
+$FailureReflectModel = "phi3:mini"
+$StepCheckModel = "phi3:mini"
+$EnableFailureReflection = $true
+$EnableStepChecks = $true
 
 $EffectiveMaxIterations = $MaxPlanIterations
 if ($EffectiveMaxIterations -le 0) { $EffectiveMaxIterations = [int]::MaxValue }
@@ -150,6 +154,37 @@ $Text
 "@
 }
 
+function Build-FailureReflectPrompt {
+    param(
+        [string]$Reason,
+        [string]$Detail,
+        [string]$BadOutput
+    )
+@"
+You are a strict JSON plan reviewer. Provide a short, concrete diagnostic summary.
+
+Rules:
+- No chain-of-thought.
+- Use plain text only.
+- Include sections:
+  DIAGNOSIS: 2-4 bullets
+  FIX_HINTS: 2-4 bullets
+  DO_NOT: 1-3 bullets
+
+GOAL:
+$Goal
+
+REJECT_REASON:
+$Reason
+
+REJECT_DETAIL:
+$Detail
+
+BAD_OUTPUT (truncated):
+$(Truncate-Text -Text $BadOutput -Max 1200)
+"@
+}
+
 function Get-GoalSummary {
     $promptText = Build-GoalRestatement -Text $Goal
     Log-Debug-Raw -Label "Goal restatement prompt" -Text $promptText
@@ -186,6 +221,34 @@ function Get-GoalSummary {
     }
     Log-Debug-Raw -Label "Goal restatement response" -Text $summary
     $summary
+}
+
+function Get-FailureReflection {
+    param(
+        [string]$Reason,
+        [string]$Detail,
+        [string]$BadOutput
+    )
+    if (-not $EnableFailureReflection) { return $null }
+    $promptText = Build-FailureReflectPrompt -Reason $Reason -Detail $Detail -BadOutput $BadOutput
+    Log-Debug-Raw -Label "Failure reflection prompt" -Text $promptText
+    $response = Invoke-Ollama-Spinner `
+        -Model $FailureReflectModel `
+        -Prompt $promptText `
+        -System "Return plain text only. No chain-of-thought." `
+        -Options @{
+            num_ctx     = 2048
+            num_predict = 400
+            temperature = 0.1
+        } `
+        -Label "Failure reflection"
+    if ($response) {
+        Log-Debug-Raw -Label "Failure reflection response" -Text $response
+        Write-Host "[AGENT] Failure reflection:"
+        $response | ForEach-Object { Write-Host $_ }
+        return $response
+    }
+    return $null
 }
 
 function Add-Failure {
@@ -239,6 +302,7 @@ $GoalRestatement = Get-GoalSummary
 $LastBadOutput = $null
 $LastRejectReason = $null
 $LastRejectDetail = $null
+$FailureHints = $null
 
 # ------------------ OLLAMA WAIT ------------------
 function Wait-ForOllama {
@@ -459,6 +523,10 @@ function Build-PlanPrompt {
         }
         $badOutputNotes = "BAD_OUTPUT:`n" + (Truncate-Text -Text $script:LastBadOutput -Max 2000) + "`nWHY_REJECTED:`n" + $script:LastRejectReason + $detail
     }
+    $hintNotes = ""
+    if ($FailureHints) {
+        $hintNotes = "RETRY_HINTS:`n" + $FailureHints
+    }
     $goalNotes = ""
     if ($GoalRestatement) {
         $goalNotes = ($GoalRestatement -join "`n")
@@ -547,6 +615,7 @@ Rules:
 - REPEAT example: REPEAT|3|CREATE_DIR|C:\\agent\\new{index:03d}
 $failureNotes
 $badOutputNotes
+$hintNotes
 $userNotes
 
 GOAL_RESTATEMENT:
@@ -610,6 +679,7 @@ while ($true) {
         Log-Debug "Reject: planner call failed"
         Add-Failure "Planner call failed"
         Set-LastReject -Reason "Planner call failed" -BadOutput "" -Detail "Model returned empty response."
+        $FailureHints = Get-FailureReflection -Reason $LastRejectReason -Detail $LastRejectDetail -BadOutput $LastBadOutput
         $PlannerRejectStreak++
         Write-Host "[AGENT] Waiting $ModelRetryDelaySeconds seconds before retry..."
         Start-Sleep -Seconds $ModelRetryDelaySeconds
@@ -634,6 +704,7 @@ while ($true) {
         Log-Debug "Reject: no JSON detected"
         Add-Failure "No JSON detected"
         Set-LastReject -Reason "No JSON detected" -BadOutput $rawClean -Detail "No <json>...</json> block found."
+        $FailureHints = Get-FailureReflection -Reason $LastRejectReason -Detail $LastRejectDetail -BadOutput $LastBadOutput
         $PlannerRejectStreak++
         continue
     }
@@ -645,6 +716,7 @@ while ($true) {
         Log-Debug "Reject: invalid JSON"
         Add-Failure "Invalid JSON"
         Set-LastReject -Reason "Invalid JSON" -BadOutput $rawClean -Detail "ConvertFrom-Json failed."
+        $FailureHints = Get-FailureReflection -Reason $LastRejectReason -Detail $LastRejectDetail -BadOutput $LastBadOutput
         $PlannerRejectStreak++
         $repaired = Repair-Json -Text $rawClean
         Log-Debug-Raw -Label "Planner repaired" -Text $repaired
@@ -794,6 +866,7 @@ while ($true) {
         $candidate.plan | ForEach-Object { Log-Debug ("Action: {0}" -f $_.action) }
         Add-Failure "Invalid action format or extra fields"
         Set-LastReject -Reason "Invalid action format or extra fields" -BadOutput $rawClean -Detail $actionRejectDetail
+        $FailureHints = Get-FailureReflection -Reason $LastRejectReason -Detail $LastRejectDetail -BadOutput $LastBadOutput
         $PlannerRejectStreak++
         continue
     }
@@ -964,6 +1037,7 @@ while ($true) {
         $candidate.plan | ForEach-Object { Log-Debug ("Action: {0}" -f $_.action) }
         Add-Failure "Invalid path"
         Set-LastReject -Reason "Invalid path" -BadOutput $rawClean -Detail $pathRejectDetail
+        $FailureHints = Get-FailureReflection -Reason $LastRejectReason -Detail $LastRejectDetail -BadOutput $LastBadOutput
         $PlannerRejectStreak++
         continue
     }
@@ -990,12 +1064,14 @@ while ($true) {
         $candidate.plan | ForEach-Object { Log-Debug ("Action: {0}" -f $_.action) }
         Add-Failure "Invalid WRITE_FILE spec"
         Set-LastReject -Reason "Invalid WRITE_FILE spec" -BadOutput $rawClean -Detail "WRITE_FILE spec is too short or contains placeholders."
+        $FailureHints = Get-FailureReflection -Reason $LastRejectReason -Detail $LastRejectDetail -BadOutput $LastBadOutput
         $PlannerRejectStreak++
         continue
     }
     if ($candidate.ready) {
         $PlannerRejectStreak = 0
         $plan = $candidate
+        $FailureHints = $null
         break
     }
 }
@@ -1541,6 +1617,41 @@ function Invoke-RepeatAction {
 # ------------------ EXECUTE ACTION ------------------
 function Execute-Action {
     param([string]$Action)
+
+    if ($EnableStepChecks) {
+        $checkPrompt = @"
+Provide a short, visible pre-step check.
+
+Rules:
+- No chain-of-thought.
+- Plain text only.
+- Include sections:
+  CHECKLIST: 2-4 bullets
+  WATCH_FOR: 1-3 bullets
+
+GOAL:
+$Goal
+
+NEXT_ACTION:
+$Action
+"@
+        Log-Debug-Raw -Label "Step check prompt" -Text $checkPrompt
+        $check = Invoke-Ollama-Spinner `
+            -Model $StepCheckModel `
+            -Prompt $checkPrompt `
+            -System "Return plain text only. No chain-of-thought." `
+            -Options @{
+                num_ctx     = 2048
+                num_predict = 300
+                temperature = 0.1
+            } `
+            -Label "Step check"
+        if ($check) {
+            Log-Debug-Raw -Label "Step check response" -Text $check
+            Write-Host "[AGENT] Step check:"
+            $check | ForEach-Object { Write-Host $_ }
+        }
+    }
 
     Write-Host "[EXEC] Action: $Action"
     $sw = [Diagnostics.Stopwatch]::StartNew()

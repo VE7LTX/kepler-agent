@@ -21,6 +21,7 @@ The agent does not download models automatically. Pull the models used for goal 
 ```powershell
 ollama pull codellama:7b-instruct
 ollama pull qwen2:7b-instruct
+ollama pull phi3:mini
 ollama pull mistral:7b-instruct
 ollama pull deepseek-coder:6.7b-instruct
 ollama pull codellama:13b-instruct
