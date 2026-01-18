@@ -211,7 +211,30 @@ function Repair-Json {
     if (-not $Text) { return $null }
     $repairPrompt = @"
 Fix the following output into valid JSON that matches the required schema.
-Return JSON ONLY, no commentary.
+Rules:
+- Output JSON only, no commentary, no markdown.
+- Do not add any extra keys beyond the schema.
+- Ensure all strings are double-quoted.
+- Do not include stray numbers or trailing commas.
+
+SCHEMA:
+{
+  "goal": "string",
+  "thinking_summary": ["string"],
+  "reflection": {
+    "issues_found": ["string"],
+    "changes_made": ["string"],
+    "confidence": 0.0
+  },
+  "ready": true,
+  "plan": [
+    {
+      "step": 1,
+      "action": "string",
+      "expects": "string"
+    }
+  ]
+}
 
 INPUT:
 $Text
