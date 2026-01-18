@@ -100,7 +100,7 @@ function Log-Debug-Raw {
     if ($DebugLogPretty) {
         $ts = (Get-Date).ToString("s")
         Add-Content -Path $DebugLogPath -Value ("[{0}] {1}:" -f $ts, $Label)
-        $lines = ($clean -split "(\r\n|\r|\n)") | Where-Object { $_ -ne "" }
+        $lines = ($clean -split "\r\n|\r|\n") | Where-Object { $_ -ne "" }
         foreach ($line in $lines) {
             Add-Content -Path $DebugLogPath -Value ("  {0}" -f $line)
         }
@@ -579,6 +579,13 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
                 }
             }
         }
+        if ($p.action -match '^LIST_DIR\|.+\\\*\.[A-Za-z0-9]+$') {
+            $glob = Split-Path -Leaf ($p.action.Split('|',2)[1])
+            if ($glob) {
+                $p.action = "FIND_FILES|$glob"
+                $normalizedActions = $true
+            }
+        }
         if ($p.action -match '^FOR_EACH\|list_key=') {
             $p.action = $p.action -replace '^FOR_EACH\|list_key=', 'FOR_EACH|'
             $normalizedActions = $true
@@ -614,6 +621,10 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
             }
         }
         if (-not $allActionsValid) { break }
+        if (-not $p.expects) {
+            $p.expects = "string"
+            $normalizedActions = $true
+        }
         if ($p.action -notmatch '^(READ_FILE|READ_PART|WRITE_FILE|APPEND_FILE|WRITE_PATCH|RUN_COMMAND|LIST_DIR|FIND_FILES|SEARCH_TEXT|FOR_EACH|BUILD_REPORT|CREATE_DIR|DELETE_FILE|DELETE_DIR|MOVE_ITEM|COPY_ITEM|RENAME_ITEM|VERIFY_PATH)\|') {
             $allActionsValid = $false
             break
@@ -633,6 +644,7 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
         continue
     }
     $pathsValid = $true
+    $findGlobs = New-Object System.Collections.Generic.HashSet[string]
     foreach ($p in $candidate.plan) {
         if ($p.action -match '^(READ_FILE|WRITE_FILE|LIST_DIR|READ_PART|APPEND_FILE|WRITE_PATCH|SEARCH_TEXT|BUILD_REPORT|CREATE_DIR|DELETE_FILE|DELETE_DIR|MOVE_ITEM|COPY_ITEM|RENAME_ITEM|VERIFY_PATH)\|') {
             $pathIndex = 1
@@ -662,6 +674,7 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
                 $pathsValid = $false
                 break
             }
+            $findGlobs.Add($glob) | Out-Null
         }
         if ($p.action -match '^FOR_EACH\|') {
             $parts = $p.action.Split('|',3)
@@ -686,6 +699,13 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
             if ($tmpl -notmatch '\{item\}') {
                 $pathsValid = $false
                 break
+            }
+            if ($listKey -match '^FIND:(.+)$') {
+                $glob = $matches[1]
+                if (-not $findGlobs.Contains($glob)) {
+                    $pathsValid = $false
+                    break
+                }
             }
         }
         if ($p.action -match '^RUN_COMMAND\|') {
