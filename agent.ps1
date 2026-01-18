@@ -1181,19 +1181,14 @@ if ($plan.reflection -and $plan.reflection.confidence -ne $null) {
     }
 
     if ($ConfirmLowConfidence -and $plan.reflection -and $plan.reflection.confidence -lt $RequireConfidence) {
-        if ((Read-Host "Low confidence. Continue anyway? (y/n)") -ne "y") {
-            $script:RejectedAction = "Low confidence declined"
-            $reason = Read-Host "Why decline the plan? (optional)"
-            if ($reason) {
-                $script:UserFeedback = $reason
-                Log-Debug ("User feedback: {0}" -f $reason)
-            }
-            $script:ReplanRequested = $true
-            $note = "Low confidence declined"
-            Add-Failure $note
-            Write-Host "[AGENT] Replanning based on user feedback..."
-            continue
-        }
+        $script:RejectedAction = "Low confidence"
+        $script:UserFeedback = "Increase confidence: plan too uncertain."
+        Log-Debug "User feedback: Increase confidence: plan too uncertain."
+        $script:ReplanRequested = $true
+        $note = "Low confidence: replanning"
+        Add-Failure $note
+        Write-Host "[AGENT] Low confidence. Replanning..."
+        continue
     }
 
 # ------------------ WRITE FILE ------------------
