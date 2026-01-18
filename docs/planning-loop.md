@@ -13,6 +13,7 @@ The planner receives a strict JSON template and a fixed action schema. The promp
 - The last rejected output (truncated)
 - User feedback from any declined step
 - Agent identity (name and backstory) to anchor WHO/WHAT/WHY
+- A reduced rule set targeted to the last rejected action types
 
 ## 3) Planner Output Requirements
 - Output must be valid JSON inside `<json>...</json>` tags.

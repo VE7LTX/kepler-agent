@@ -536,6 +536,21 @@ function Strip-JsonFences {
 
 # ------------------ PLAN PROMPT ------------------
 function Build-PlanPrompt {
+    function Get-ActionNamesFromText {
+        param([string]$Text)
+        if (-not $Text) { return @() }
+        $matches = [regex]::Matches($Text, '"action"\s*:\s*"(.*?)"')
+        $names = New-Object System.Collections.Generic.HashSet[string]
+        foreach ($m in $matches) {
+            $action = $m.Groups[1].Value
+            $m2 = [regex]::Match($action, '^([A-Z_]+)\|')
+            if ($m2.Success) {
+                $names.Add($m2.Groups[1].Value) | Out-Null
+            }
+        }
+        return @($names)
+    }
+
     $failureNotes = ""
     if ($FailureMemory.Count -gt 0) {
         $failureNotes = "Recent failures to avoid:`n- " + ($FailureMemory -join "`n- ")
@@ -560,6 +575,44 @@ function Build-PlanPrompt {
     if ($script:UserFeedback) {
         $userNotes = "USER_FEEDBACK:`n" + $script:UserFeedback
     }
+
+    $coreRules = @(
+        "Provide a brief thinking_summary (2-4 short bullets). Do NOT include chain-of-thought.",
+        "Plan should be minimal and ordered.",
+        "Use absolute Windows paths or workspace-relative paths under C:\\agent only.",
+        "Do not use Unix-style paths (e.g., /home/user).",
+        "Do not use placeholders like \"<path>\" or \"/path/to/...\".",
+        "Do NOT use parent traversal (e.g., {item}\\.. or ..) in any path.",
+        "Actions must be single-line; if content needs newlines, use \\n escapes in the spec.",
+        "Each plan item must have only: step, action, expects.",
+        "Allowed actions only: READ_FILE, READ_PART, WRITE_FILE, APPEND_FILE, WRITE_PATCH, RUN_COMMAND, LIST_DIR, FIND_FILES, SEARCH_TEXT, FOR_EACH, REPEAT, BUILD_REPORT, CREATE_DIR, DELETE_FILE, DELETE_DIR, MOVE_ITEM, COPY_ITEM, RENAME_ITEM, VERIFY_PATH."
+    )
+
+    $actionRules = @()
+    $lastActions = Get-ActionNamesFromText -Text $script:LastBadOutput
+    if ($lastActions.Count -eq 0) {
+        $lastActions = @("RUN_COMMAND","WRITE_FILE","READ_FILE","FOR_EACH","REPEAT","LIST_DIR","FIND_FILES")
+    }
+    if ($lastActions -contains "RUN_COMMAND") {
+        $actionRules += "Use PowerShell-native commands only; avoid sh, bash, seq, xargs, grep, awk, sed, cut, head, tail."
+        $actionRules += "Do NOT invent cmdlets. If you need computation, write explicit PowerShell expressions inside RUN_COMMAND."
+    }
+    if ($lastActions -contains "FOR_EACH") {
+        $actionRules += "FOR_EACH may only operate on existing files or directories discovered earlier in the plan."
+        $actionRules += "Do NOT use FOR_EACH to create new directories or files."
+        $actionRules += "{item} expands to a full absolute path from LIST_DIR/FIND_FILES. Do not treat it as a basename."
+    }
+    if ($lastActions -contains "REPEAT") {
+        $actionRules += "REPEAT index is zero-based. Use {index} or {index:03d} for padding."
+    }
+    if ($lastActions -contains "WRITE_FILE") {
+        $actionRules += "WRITE_FILE spec must be real content, not metadata or placeholders."
+    }
+    if ($lastActions -contains "LIST_DIR" -or $lastActions -contains "FIND_FILES") {
+        $actionRules += "Do NOT combine discovery (FIND_FILES/LIST_DIR) with creation of new entities in the same step."
+    }
+    $rulesText = ($coreRules + $actionRules) -join "`n- "
+
 @"
 Return JSON ONLY inside <json>...</json> tags. Do not output anything outside the tags.
 Use the exact template and fill in values. Do not add keys.
@@ -582,6 +635,46 @@ TEMPLATE:
       "expects": ""
     }
   ]
+}
+</json>
+
+Schema:
+{
+  "goal": "string",
+  "thinking_summary": ["string"],
+  "reflection": {
+    "issues_found": ["string"],
+    "changes_made": ["string"],
+    "confidence": 0.0
+  },
+  "ready": true,
+  "plan": [
+    {
+      "step": 1,
+      "action": "READ_FILE|<path> or READ_PART|<path>|<start>|<count> or WRITE_FILE|<path>|<spec> or APPEND_FILE|<path>|<text> or WRITE_PATCH|<path>|<diff> or RUN_COMMAND|<command> or LIST_DIR|<path> or FIND_FILES|<glob> or SEARCH_TEXT|<pattern>|<path> or FOR_EACH|<list_key>|<action_template> or REPEAT|<count>|<action_template> or BUILD_REPORT|<glob>|<start>|<count>|<outpath>|<patterns> or CREATE_DIR|<path> or DELETE_FILE|<path> or DELETE_DIR|<path> or MOVE_ITEM|<src>|<dest> or COPY_ITEM|<src>|<dest> or RENAME_ITEM|<src>|<dest> or VERIFY_PATH|<path>",
+      "expects": "string"
+    }
+  ]
+}
+
+Rules:
+- $rulesText
+
+$failureNotes
+$badOutputNotes
+$hintNotes
+$userNotes
+
+AGENT IDENTITY:
+Name: $AgentName
+Backstory: $AgentBackstory
+
+GOAL_RESTATEMENT:
+$goalNotes
+
+GOAL:
+$Goal
+"@
 }
 </json>
 
@@ -1948,6 +2041,7 @@ if ($script:ReplanRequested) {
 break
 }
 Write-Host "`n[AGENT] Done."
+
 
 
 
