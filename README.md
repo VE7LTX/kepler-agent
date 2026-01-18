@@ -14,6 +14,7 @@ A local PowerShell automation agent that plans tasks, validates actions, and exe
 - Shows a spinner while model calls are running.
 
 ## Docs
+- `docs/quickstart.md`: First-time setup (Ollama install, model pulls, run steps).
 - `docs/action-model.md`: Full action reference, validation rules, and examples.
 - `docs/planning-loop.md`: Planner schema, JSON requirements, fallbacks, and rejection logic.
 - `docs/config.md`: Configuration knobs and defaults.
