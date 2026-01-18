@@ -125,16 +125,37 @@ $Text
 function Get-GoalSummary {
     $promptText = Build-GoalRestatement -Text $Goal
     Log-Debug-Raw -Label "Goal restatement prompt" -Text $promptText
-    $summary = Invoke-Ollama-Spinner `
-        -Model $PlannerModel `
-        -Prompt $promptText `
-        -System "Return plain text only." `
-        -Options @{
-            num_ctx     = $PlannerNumCtx
-            num_predict = 200
-            temperature = 0.1
-        } `
-        -Label "Goal summary"
+    if (Get-Command Invoke-Ollama-Spinner -ErrorAction SilentlyContinue) {
+        $summary = Invoke-Ollama-Spinner `
+            -Model $PlannerModel `
+            -Prompt $promptText `
+            -System "Return plain text only." `
+            -Options @{
+                num_ctx     = $PlannerNumCtx
+                num_predict = 200
+                temperature = 0.1
+            } `
+            -Label "Goal summary"
+    } else {
+        $body = @{
+            model   = $PlannerModel
+            prompt  = $promptText
+            system  = "Return plain text only."
+            options = @{
+                num_ctx     = $PlannerNumCtx
+                num_predict = 200
+                temperature = 0.1
+            }
+            stream  = $false
+        }
+        $summary = (Invoke-RestMethod `
+            -Uri $OllamaGenApi `
+            -Method Post `
+            -ContentType "application/json" `
+            -Body ($body | ConvertTo-Json -Depth 10) `
+            -TimeoutSec 600
+        ).response
+    }
     Log-Debug-Raw -Label "Goal restatement response" -Text $summary
     $summary
 }
