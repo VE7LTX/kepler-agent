@@ -1,25 +1,59 @@
-﻿# Planning Loop
+# Planning Loop
 
-## JSON Requirements
-- Planner output must be wrapped in `<json>...</json>` tags.
-- JSON must follow the fixed schema (goal, thinking_summary, reflection, ready, plan).
-- Each plan item must have only: `step`, `action`, `expects`.
-- Any non-conforming output is rejected and repaired.
+This section describes how the planner generates a plan, how the agent validates it, and how failures are handled.
 
-## Planner Routing
-- Planner switches after 2 consecutive rejects:
-  `codellama:13b-instruct` → `qwen2:7b-instruct` → `mistral:7b-instruct` → `deepseek-coder:6.7b-instruct`.
-- Goal restatement is computed by a fast model and injected before planning.
+## 1) Goal Restatement (fast)
+A fast model summarizes the goal into WHO/WHAT/WHEN/WHERE/WHY. This summary is injected into the planner prompt to keep the model aligned with the user intent.
 
-## Failure Memory
-- Recent failures are injected into the next planning prompt to avoid repeating mistakes.
-- Last bad output is attached to the next prompt with a rejection reason.
-- User feedback from a declined step is included on the next replan.
+## 2) Planner Prompt
+The planner receives a strict JSON template and a fixed action schema. The prompt includes:
+- The required `<json>...</json>` wrapper
+- The allowed actions list
+- Recent rejection reasons
+- The last rejected output (truncated)
+- User feedback from any declined step
 
-## Timing
+## 3) Planner Output Requirements
+- Output must be valid JSON inside `<json>...</json>` tags.
+- Only these keys are allowed: `goal`, `thinking_summary`, `reflection`, `ready`, `plan`.
+- Each plan item must contain only `step`, `action`, and `expects`.
+- Actions must be single-line strings with no raw newlines.
+
+## 4) Validation and Repair
+The agent validates:
+- JSON format and schema
+- Allowed actions only
+- Path safety (must remain under `C:\agent\`)
+- `WRITE_FILE` content must be real text (not placeholders)
+- `FOR_EACH` list keys must already exist
+
+If JSON is invalid, the agent attempts a repair pass and retries.
+
+## 5) Planner Routing
+The planner tries a strong model first, then falls back after repeated rejects:
+- First pass: `codellama:13b-instruct`
+- Fallback chain: `codellama:13b-instruct` ? `qwen2:7b-instruct` ? `mistral:7b-instruct` ? `deepseek-coder:6.7b-instruct`
+
+A smaller model is used when reliability is better than raw size.
+
+## 6) Failure Memory
+Recent failures are fed back into the next prompt. The last rejected output and the rejection reason are included to help the planner avoid repeating the same mistake.
+
+## 7) Approval and Execution
+Once a plan passes validation, the agent shows:
+- The plan steps
+- A short thinking summary
+- The WHO/WHAT/WHEN/WHERE/WHY restatement
+- Confidence
+
+The user approves once for the whole plan and chooses:
+- all steps
+- step-by-step
+- cancel
+
+If a step is declined, the agent asks why, saves the feedback, and replans.
+
+## 8) Timing and Logs
 - Planner response time is printed each iteration.
-- Each execution step prints elapsed time.
-
-## Model Failures
-- On model call failure, the agent waits a few seconds and retries.
-- CUDA/OOM errors trigger a fallback to smaller models.
+- Each action prints elapsed time.
+- Full prompts and outputs are logged to `C:\agent\agent-debug.log`.

@@ -1,21 +1,31 @@
 # Approval Flow
 
-The agent asks for plan approval once per planning cycle and then executes based on the chosen mode.
+This agent asks for approval once per plan and then executes according to the selected mode.
 
-## Plan approval options
-- a: approve all steps (no per-step prompts)
-- s: step-by-step approvals (prompt for each action)
-- n: cancel the run
+## Plan Approval Prompt
+You will see a single prompt:
+- `a`: approve all steps (no per-step prompts)
+- `s`: step-by-step approvals (prompt for each action)
+- `n`: cancel the run
 
-## Per-step declines
-If a step is declined in step-by-step mode:
-- The agent asks for a short reason.
-- That feedback is added to the next planning prompt.
-- The agent replans and presents an updated plan.
+Choose `a` when you want a fully automatic run after the plan is printed. Choose `s` when you want to supervise every action.
 
-## Low confidence handling
-If a plan confidence is below the configured threshold, the agent asks for explicit confirmation before executing.
+## Step Declines and Replans
+In step-by-step mode, if you answer `n` to any action:
+1. The agent asks for a short reason.
+2. That reason is injected into the next planning prompt as `USER_FEEDBACK`.
+3. The agent replans and shows a new plan.
 
-## Notes
-- Declining a step does not end the session; it triggers a replan loop.
-- The feedback is included verbatim, so keep it short and specific.
+This lets you refine the goal without restarting the session.
+
+## Low Confidence Handling
+If the planner confidence is below the configured threshold, the agent asks for a second confirmation before executing.
+
+## Why This Exists
+- A single plan approval reduces repetitive prompts for safe tasks.
+- Step-by-step approval helps when actions are destructive or unclear.
+- Replanning keeps the loop going without losing context.
+
+## Tips
+- Keep feedback concise and specific (e.g., "Don't delete files" or "Use C:\agent\reports\output.txt instead").
+- If you choose `a`, all prompts are skipped unless `ConfirmRiskyActions` is disabled.
