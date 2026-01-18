@@ -6,13 +6,15 @@
 - Each plan item must have only: `step`, `action`, `expects`.
 - Any non-conforming output is rejected and repaired.
 
-## Escalation
-- Planner escalates after 2 consecutive rejects:
-  `qwen2:7b-instruct` → `mistral:7b-instruct` → `deepseek-coder:6.7b-instruct` → `codellama:13b-instruct`.
+## Planner Routing
+- Planner switches after 2 consecutive rejects:
+  `codellama:13b-instruct` → `qwen2:7b-instruct` → `mistral:7b-instruct` → `deepseek-coder:6.7b-instruct`.
+- Goal restatement is computed by a fast model and injected before planning.
 
 ## Failure Memory
 - Recent failures are injected into the next planning prompt to avoid repeating mistakes.
 - Last bad output is attached to the next prompt with a rejection reason.
+- User feedback from a declined step is included on the next replan.
 
 ## Timing
 - Planner response time is printed each iteration.

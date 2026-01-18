@@ -6,6 +6,7 @@
 - **Invalid path**: Paths outside `C:\agent\` or invalid placeholders.
 - **Missing list**: `FOR_EACH` uses a list key that wasn’t created via `FIND_FILES` or `LIST_DIR`.
 - **Model 500 errors**: Ollama model call failed; the agent will wait and retry, or fall back.
+- **Model switched to smaller**: The planner rotates through fallback models for reliability after rejects or errors.
 
 ## Tips
 - Use `BUILD_REPORT` for scan-and-summarize tasks.

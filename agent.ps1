@@ -1,8 +1,8 @@
-﻿# ============================================================
+# ============================================================
 # agent.ps1 (Windows PowerShell 5.1 SAFE)
 # Dual-model autonomous agent
 #
-# Planner : phi3-4k
+# Planner : codellama:13b-instruct (first pass)
 # Writer  : codellama:7b-instruct
 #
 # GUARANTEES:
@@ -43,10 +43,10 @@ $MaxPlanIterations = 0
 $MaxPlanMinutes    = 0
 $RequireConfidence = 0.75
 $PlannerFallbacks = @(
+    @{ name = "codellama:13b-instruct"; temp = 0.0 },
     @{ name = "qwen2:7b-instruct"; temp = 0.0 },
     @{ name = "mistral:7b-instruct"; temp = 0.0 },
-    @{ name = "deepseek-coder:6.7b-instruct"; temp = 0.0 },
-    @{ name = "codellama:13b-instruct"; temp = 0.0 }
+    @{ name = "deepseek-coder:6.7b-instruct"; temp = 0.0 }
 )
 $PlannerFallbackIndex = 0
 $PlannerRejectStreak = 0
@@ -60,6 +60,10 @@ if ($EffectiveMaxIterations -le 0) { $EffectiveMaxIterations = [int]::MaxValue }
 $ConfirmOncePerTask  = $true
 $ConfirmRiskyActions = $true
 $ConfirmLowConfidence = $true
+$ApprovalMode = "step"
+$script:ReplanRequested = $false
+$script:UserFeedback = $null
+$script:RejectedAction = $null
 
 $WriterFallbacks = @(
     "codellama:7b-instruct",
@@ -107,12 +111,11 @@ function Log-Debug-Raw {
     }
     if ($DebugLogPretty) {
         $ts = (Get-Date).ToString("s")
-        Add-Content -Path $DebugLogPath -Value ("[{0}] {1}:" -f $ts, $Label)
-        $lines = ($clean -split "\r\n|\r|\n") | Where-Object { $_ -ne "" }
+        Add-Content -Path $DebugLogPath -Value ("[{0}] {1}:" -f $ts, $Label)    
+        $lines = ($clean -split "\r\n|\r|\n") | Where-Object { $_ -ne "" }      
         foreach ($line in $lines) {
             Add-Content -Path $DebugLogPath -Value ("  {0}" -f $line)
         }
-        Add-Content -Path $DebugLogPath -Value ""
         return
     }
     $clean = $clean -replace "(\r\n|\r|\n)", "\n"
@@ -437,6 +440,10 @@ function Build-PlanPrompt {
     if ($GoalRestatement) {
         $goalNotes = ($GoalRestatement -join "`n")
     }
+    $userNotes = ""
+    if ($script:UserFeedback) {
+        $userNotes = "USER_FEEDBACK:`n" + $script:UserFeedback
+    }
 @"
 Return JSON ONLY inside <json>...</json> tags. Do not output anything outside the tags.
 Use the exact template and fill in values. Do not add keys.
@@ -510,6 +517,7 @@ Rules:
 - REPEAT example: REPEAT|3|CREATE_DIR|C:\\agent\\new{index:03d}
 $failureNotes
 $badOutputNotes
+$userNotes
 
 GOAL_RESTATEMENT:
 $goalNotes
@@ -520,10 +528,13 @@ $Goal
 }
 
 # ------------------ PLANNING LOOP ------------------
-$start = Get-Date
-$plan = $null
+while ($true) {
+    $start = Get-Date
+    $plan = $null
+    $script:ReplanRequested = $false
+    $script:RejectedAction = $null
 
-for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
+    for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
 
     if ($MaxPlanMinutes -gt 0 -and (New-TimeSpan $start (Get-Date)).TotalMinutes -gt $MaxPlanMinutes) {
         throw "Planning timeout"
@@ -542,8 +553,8 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
         $PlannerRejectStreak = 0
         $PlannerModel = $PlannerFallbacks[$PlannerFallbackIndex].name
         $PlannerTemp = $PlannerFallbacks[$PlannerFallbackIndex].temp
-        Write-Host "[AGENT] Escalating planner model to $PlannerModel"
-        Log-Debug "Escalated planner model to $PlannerModel"
+        Write-Host "[AGENT] Switching planner model to $PlannerModel"
+        Log-Debug "Switching planner model to $PlannerModel"
     }
 
     $planPrompt = Build-PlanPrompt
@@ -571,14 +582,12 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
         $PlannerRejectStreak++
         Write-Host "[AGENT] Waiting $ModelRetryDelaySeconds seconds before retry..."
         Start-Sleep -Seconds $ModelRetryDelaySeconds
-        if ($script:LastModelError -match '(?i)cuda|oom|out of memory') {
-            if ($PlannerFallbackIndex -lt ($PlannerFallbacks.Count - 1)) {
-                $PlannerFallbackIndex++
-                $PlannerModel = $PlannerFallbacks[$PlannerFallbackIndex].name
-                $PlannerTemp = $PlannerFallbacks[$PlannerFallbackIndex].temp
-                Write-Host "[AGENT] Switching planner model after error to $PlannerModel"
-                Log-Debug "Switching planner model after error to $PlannerModel"
-            }
+        if ($PlannerFallbackIndex -lt ($PlannerFallbacks.Count - 1)) {
+            $PlannerFallbackIndex++
+            $PlannerModel = $PlannerFallbacks[$PlannerFallbackIndex].name
+            $PlannerTemp = $PlannerFallbacks[$PlannerFallbackIndex].temp
+            Write-Host "[AGENT] Switching planner model after error to $PlannerModel"
+            Log-Debug "Switching planner model after error to $PlannerModel"
         }
         continue
     }
@@ -931,7 +940,14 @@ if ($plan.reflection -and $plan.reflection.confidence -ne $null) {
 }
 
 if ($ConfirmOncePerTask) {
-    if ((Read-Host "Approve plan? (y/n)") -ne "y") { exit }
+    $resp = Read-Host "Approve plan? (a=all steps, s=step-by-step, n=cancel)"
+    if ($resp -eq "a") {
+        $ApprovalMode = "all"
+    } elseif ($resp -eq "s") {
+        $ApprovalMode = "step"
+    } else {
+        exit
+    }
 }
 
 if ($ConfirmLowConfidence -and $plan.reflection -and $plan.reflection.confidence -lt $RequireConfidence) {
@@ -1485,7 +1501,7 @@ function Execute-Action {
     }
 
     if ($Action -match '(?s)^WRITE_FILE\|(.+?)\|(.+)$') {
-        if (-not (Confirm-Action -Kind "WRITE_FILE" -Detail $matches[1])) { exit }
+        if (-not (Confirm-Action -Kind "WRITE_FILE" -Detail $matches[1])) { return $false }
         Write-File -Path $matches[1] -Spec $matches[2]
         $sw.Stop()
         Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
@@ -1493,7 +1509,7 @@ function Execute-Action {
     }
 
     if ($Action -match '(?s)^APPEND_FILE\|(.+?)\|(.+)$') {
-        if (-not (Confirm-Action -Kind "APPEND_FILE" -Detail $matches[1])) { exit }
+        if (-not (Confirm-Action -Kind "APPEND_FILE" -Detail $matches[1])) { return $false }
         Append-File -Path $matches[1] -Text $matches[2]
         $sw.Stop()
         Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
@@ -1501,7 +1517,7 @@ function Execute-Action {
     }
 
     if ($Action -match '(?s)^WRITE_PATCH\|(.+?)\|(.+)$') {
-        if (-not (Confirm-Action -Kind "WRITE_PATCH" -Detail $matches[1])) { exit }
+        if (-not (Confirm-Action -Kind "WRITE_PATCH" -Detail $matches[1])) { return $false }
         Write-Patch -Path $matches[1] -Diff $matches[2]
         $sw.Stop()
         Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
@@ -1509,7 +1525,7 @@ function Execute-Action {
     }
 
     if ($Action -match '(?s)^RUN_COMMAND\|(.+)$') {
-        if (-not (Confirm-Action -Kind "RUN_COMMAND" -Detail $matches[1])) { exit }
+        if (-not (Confirm-Action -Kind "RUN_COMMAND" -Detail $matches[1])) { return $false }
         Run-Command -Command $matches[1]
         $sw.Stop()
         Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
@@ -1531,7 +1547,7 @@ function Execute-Action {
     }
 
     if ($Action -match '^BUILD_REPORT\|([^|]+)\|(\d+)\|(\d+)\|([^|]+)\|(.+)$') {
-        if (-not (Confirm-Action -Kind "BUILD_REPORT" -Detail $matches[4])) { exit }
+        if (-not (Confirm-Action -Kind "BUILD_REPORT" -Detail $matches[4])) { return $false }
         Build-Report -Glob $matches[1] -Start ([int]$matches[2]) -Count ([int]$matches[3]) -OutPath $matches[4] -Patterns $matches[5]
         $sw.Stop()
         Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
@@ -1539,7 +1555,7 @@ function Execute-Action {
     }
 
     if ($Action -match '^CREATE_DIR\|(.+)$') {
-        if (-not (Confirm-Action -Kind "CREATE_DIR" -Detail $matches[1])) { exit }
+        if (-not (Confirm-Action -Kind "CREATE_DIR" -Detail $matches[1])) { return $false }
         Create-Dir -Path $matches[1]
         $sw.Stop()
         Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
@@ -1547,7 +1563,7 @@ function Execute-Action {
     }
 
     if ($Action -match '^DELETE_FILE\|(.+)$') {
-        if (-not (Confirm-Action -Kind "DELETE_FILE" -Detail $matches[1])) { exit }
+        if (-not (Confirm-Action -Kind "DELETE_FILE" -Detail $matches[1])) { return $false }
         Delete-File -Path $matches[1]
         $sw.Stop()
         Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
@@ -1555,7 +1571,7 @@ function Execute-Action {
     }
 
     if ($Action -match '^DELETE_DIR\|(.+)$') {
-        if (-not (Confirm-Action -Kind "DELETE_DIR" -Detail $matches[1])) { exit }
+        if (-not (Confirm-Action -Kind "DELETE_DIR" -Detail $matches[1])) { return $false }
         Delete-Dir -Path $matches[1]
         $sw.Stop()
         Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
@@ -1563,7 +1579,7 @@ function Execute-Action {
     }
 
     if ($Action -match '^MOVE_ITEM\|(.+?)\|(.+)$') {
-        if (-not (Confirm-Action -Kind "MOVE_ITEM" -Detail $matches[1])) { exit }
+        if (-not (Confirm-Action -Kind "MOVE_ITEM" -Detail $matches[1])) { return $false }
         Move-ItemSafe -Source $matches[1] -Dest $matches[2]
         $sw.Stop()
         Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
@@ -1571,7 +1587,7 @@ function Execute-Action {
     }
 
     if ($Action -match '^COPY_ITEM\|(.+?)\|(.+)$') {
-        if (-not (Confirm-Action -Kind "COPY_ITEM" -Detail $matches[1])) { exit }
+        if (-not (Confirm-Action -Kind "COPY_ITEM" -Detail $matches[1])) { return $false }
         Copy-ItemSafe -Source $matches[1] -Dest $matches[2]
         $sw.Stop()
         Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
@@ -1579,7 +1595,7 @@ function Execute-Action {
     }
 
     if ($Action -match '^RENAME_ITEM\|(.+?)\|(.+)$') {
-        if (-not (Confirm-Action -Kind "RENAME_ITEM" -Detail $matches[1])) { exit }
+        if (-not (Confirm-Action -Kind "RENAME_ITEM" -Detail $matches[1])) { return $false }
         Rename-ItemSafe -Source $matches[1] -Dest $matches[2]
         $sw.Stop()
         Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
@@ -1626,17 +1642,43 @@ function Confirm-Action {
         [string]$Detail
     )
 
+    if ($ApprovalMode -eq "all") { return $true }
     if (-not $ConfirmRiskyActions) { return $true }
     $resp = Read-Host "Approve $Kind? $Detail (y/n)"
-    return ($resp -eq "y")
+    if ($resp -ne "y") {
+        $script:RejectedAction = "$Kind $Detail"
+        $reason = Read-Host "Why skip this step? (optional)"
+        if ($reason) {
+            $script:UserFeedback = $reason
+            Log-Debug ("User feedback: {0}" -f $reason)
+        }
+        $script:ReplanRequested = $true
+        return $false
+    }
+    return $true
 }
 
 # ------------------ EXECUTION ------------------
 $script:Context = @{}
 foreach ($s in $plan.plan) {
-    Execute-Action -Action $s.action
+    $ok = Execute-Action -Action $s.action
+    if ($ok -eq $false) { break }
 }
 
+if ($script:ReplanRequested) {
+    $note = "User declined action: $($script:RejectedAction)"
+    Add-Failure $note
+    Write-Host "[AGENT] Replanning based on user feedback..."
+    continue
+}
+
+break
+}
 Write-Host "`n[AGENT] Done."
+
+
+
+
+
 
 

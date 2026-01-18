@@ -12,6 +12,7 @@ ollama --version
 ## 2) Pull Models
 Pull the planner and writer models used by the agent. Recommended set:
 ```powershell
+ollama pull codellama:7b-instruct
 ollama pull qwen2:7b-instruct
 ollama pull mistral:7b-instruct
 ollama pull deepseek-coder:6.7b-instruct
@@ -48,4 +49,5 @@ The agent writes logs to:
 
 ## Troubleshooting
 - If model calls hang, confirm Ollama is running and the model names match `agent.ps1`.
+- If a model is missing, run `ollama pull <model>` first (the agent does not auto-download models).
 - If planning loops, check `C:\agent\agent-debug.log` for invalid JSON or action format rejections.

@@ -22,10 +22,11 @@
 - Ensure list outputs (DIR/FIND) are consistent (full paths vs names) to build correct file paths. (pending: choose one format and document)
 
 ## Logging / UX
-- Keep debug log readable (no blank lines between every line).
+- Keep debug log readable (no blank lines between every line). (done)
 - Log planner prompts/responses and repair inputs/outputs when DebugLogFull is enabled.
 - Show model/time status for long-running planner/writer calls.
 - Add approval mode to ask once per plan for yes-to-all vs step-by-step. (done)
+- If a step is declined, collect a reason and replan with that feedback. (done)
 
 ## Example Plan (for reference)
 - CREATE_DIR|C:\agent\new000

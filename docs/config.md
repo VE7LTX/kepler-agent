@@ -17,6 +17,7 @@ Key settings live near the top of `agent.ps1`.
 - `ConfirmOncePerTask`
 - `ConfirmRiskyActions`
 - `ConfirmLowConfidence`
+- `ApprovalMode` (default, overridden by plan prompt)
 
 ## Logging
 - `DebugLogPath`
@@ -27,6 +28,7 @@ Key settings live near the top of `agent.ps1`.
 
 ## Timing / Retry
 - `ModelRetryDelaySeconds`
+- `EscalateAfterRejects`
 
 ## Root
 - `RootDir` constrains all file and path actions.
