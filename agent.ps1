@@ -611,6 +611,12 @@ function Build-PlanPrompt {
     if ($lastActions -contains "LIST_DIR" -or $lastActions -contains "FIND_FILES") {
         $actionRules += "Do NOT combine discovery (FIND_FILES/LIST_DIR) with creation of new entities in the same step."
     }
+    if ($lastActions -contains "READ_FILE") {
+        $fileMentioned = ($Goal -match '(?i)\bfile\b|\\\w+\.txt|\.\w{2,4}')
+        if (-not $fileMentioned) {
+            $actionRules += "Do NOT use READ_FILE unless the goal mentions a file or a prior step created it."
+        }
+    }
     $rulesText = ($coreRules + $actionRules) -join "`n- "
 
 @"
