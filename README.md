@@ -10,6 +10,7 @@ A local PowerShell automation agent that plans tasks, validates actions, and exe
 - Repairs invalid JSON output and retries planning when possible.
 - Escalates to stronger planner models after repeated failures.
 - Uses a strict JSON template wrapped in `<json>...</json>` tags.
+- Prints per-step timing and planner response time to show when larger models take longer.
 
 ## Action Model
 All actions are single-line strings in the plan. Multi-file tasks use `FOR_EACH` or `BUILD_REPORT`.

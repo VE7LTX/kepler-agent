@@ -29,7 +29,7 @@ $ErrorActionPreference = "Stop"
 
 # ------------------ CONFIG ------------------
 $PlannerModel = "phi3-4k"
-$WriterModel  = "codellama:7b-instruct"
+$WriterModel  = "codellama:13b-instruct"
 
 $PlannerNumCtx   = 4096
 $PlannerPredict  = 900
@@ -422,6 +422,8 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
 
     $planPrompt = Build-PlanPrompt
     Log-Debug-Raw -Label "Planner prompt" -Text $planPrompt
+    Write-Host "[AGENT] Planner model: $PlannerModel"
+    $planSw = [Diagnostics.Stopwatch]::StartNew()
     $raw = Invoke-Ollama `
         -Model $PlannerModel `
         -Prompt $planPrompt `
@@ -431,6 +433,9 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
             num_predict = $PlannerPredict
             temperature = $PlannerTemp
         }
+    $planSw.Stop()
+    Write-Host ("[AGENT] Planner response time: {0:N2}s" -f $planSw.Elapsed.TotalSeconds)
+    Log-Debug ("Planner response time: {0:N2}s" -f $planSw.Elapsed.TotalSeconds)
     Log-Debug-Raw -Label "Planner raw" -Text $raw
 
     $rawClean = Strip-JsonFences -Text $raw
@@ -1186,104 +1191,141 @@ function Execute-Action {
     param([string]$Action)
 
     Write-Host "[EXEC] Action: $Action"
+    $sw = [Diagnostics.Stopwatch]::StartNew()
     if ($Action -match '^READ_FILE\|(.+)$') {
         Read-File -Path $matches[1]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '^READ_PART\|(.+?)\|(\d+)\|(\d+)$') {
         Read-Part -Path $matches[1] -Start ([int]$matches[2]) -Count ([int]$matches[3])
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '^LIST_DIR\|(.+)$') {
         List-Dir -Path $matches[1]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '^FIND_FILES\|(.+)$') {
         Find-Files -Glob $matches[1]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '^SEARCH_TEXT\|(.+?)\|(.+)$') {
         Search-Text -Pattern $matches[1] -Path $matches[2]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '(?s)^WRITE_FILE\|(.+?)\|(.+)$') {
         if (-not (Confirm-Action -Kind "WRITE_FILE" -Detail $matches[1])) { exit }
         Write-File -Path $matches[1] -Spec $matches[2]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '(?s)^APPEND_FILE\|(.+?)\|(.+)$') {
         if (-not (Confirm-Action -Kind "APPEND_FILE" -Detail $matches[1])) { exit }
         Append-File -Path $matches[1] -Text $matches[2]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '(?s)^WRITE_PATCH\|(.+?)\|(.+)$') {
         if (-not (Confirm-Action -Kind "WRITE_PATCH" -Detail $matches[1])) { exit }
         Write-Patch -Path $matches[1] -Diff $matches[2]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '(?s)^RUN_COMMAND\|(.+)$') {
         if (-not (Confirm-Action -Kind "RUN_COMMAND" -Detail $matches[1])) { exit }
         Run-Command -Command $matches[1]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '^FOR_EACH\|(.+?)\|(.+)$') {
         Invoke-ForEachAction -ListKey $matches[1] -Template $matches[2]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '^BUILD_REPORT\|([^|]+)\|(\d+)\|(\d+)\|([^|]+)\|(.+)$') {
         if (-not (Confirm-Action -Kind "BUILD_REPORT" -Detail $matches[4])) { exit }
         Build-Report -Glob $matches[1] -Start ([int]$matches[2]) -Count ([int]$matches[3]) -OutPath $matches[4] -Patterns $matches[5]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '^CREATE_DIR\|(.+)$') {
         if (-not (Confirm-Action -Kind "CREATE_DIR" -Detail $matches[1])) { exit }
         Create-Dir -Path $matches[1]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '^DELETE_FILE\|(.+)$') {
         if (-not (Confirm-Action -Kind "DELETE_FILE" -Detail $matches[1])) { exit }
         Delete-File -Path $matches[1]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '^DELETE_DIR\|(.+)$') {
         if (-not (Confirm-Action -Kind "DELETE_DIR" -Detail $matches[1])) { exit }
         Delete-Dir -Path $matches[1]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '^MOVE_ITEM\|(.+?)\|(.+)$') {
         if (-not (Confirm-Action -Kind "MOVE_ITEM" -Detail $matches[1])) { exit }
         Move-ItemSafe -Source $matches[1] -Dest $matches[2]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '^COPY_ITEM\|(.+?)\|(.+)$') {
         if (-not (Confirm-Action -Kind "COPY_ITEM" -Detail $matches[1])) { exit }
         Copy-ItemSafe -Source $matches[1] -Dest $matches[2]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '^RENAME_ITEM\|(.+?)\|(.+)$') {
         if (-not (Confirm-Action -Kind "RENAME_ITEM" -Detail $matches[1])) { exit }
         Rename-ItemSafe -Source $matches[1] -Dest $matches[2]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
     if ($Action -match '^VERIFY_PATH\|(.+)$') {
         Verify-Path -Path $matches[1]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
     }
 
