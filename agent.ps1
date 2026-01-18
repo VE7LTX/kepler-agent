@@ -39,9 +39,20 @@ $WriterNumCtx    = 4096
 $WriterPredict   = 2400
 $WriterTemp      = 0.15
 
-$MaxPlanIterations = 25
-$MaxPlanMinutes    = 10
+$MaxPlanIterations = 0
+$MaxPlanMinutes    = 0
 $RequireConfidence = 0.75
+$PlannerFallbacks = @(
+    @{ name = "phi3-4k"; temp = 0.2 },
+    @{ name = "phi3:latest"; temp = 0.2 },
+    @{ name = "codellama:7b-instruct-8k"; temp = 0.2 }
+)
+$PlannerFallbackIndex = 0
+$PlannerRejectStreak = 0
+$EscalateAfterRejects = 3
+
+$EffectiveMaxIterations = $MaxPlanIterations
+if ($EffectiveMaxIterations -le 0) { $EffectiveMaxIterations = [int]::MaxValue }
 
 $ConfirmOncePerTask  = $true
 $ConfirmRiskyActions = $true
@@ -80,6 +91,41 @@ function Log-Debug-Raw {
     Log-Debug ("{0}: {1}" -f $Label, $clean)
 }
 
+# ------------------ GOAL RESTATEMENT ------------------
+function Build-GoalRestatement {
+    param([string]$Text)
+@"
+Summarize the goal into WHO/WHAT/WHEN/WHERE/WHY as short bullet points.
+Return plain text only, 4-6 bullets, no chain-of-thought.
+
+GOAL:
+$Text
+"@
+}
+
+function Get-GoalSummary {
+    $summary = Invoke-Ollama `
+        -Model $PlannerModel `
+        -Prompt (Build-GoalRestatement -Text $Goal) `
+        -System "Return plain text only." `
+        -Options @{
+            num_ctx     = $PlannerNumCtx
+            num_predict = 200
+            temperature = 0.1
+        }
+    $summary
+}
+
+function Add-Failure {
+    param([string]$Reason)
+    if (-not $Reason) { return }
+    $FailureMemory.Add($Reason)
+    Log-Debug ("Failure: {0}" -f $Reason)
+    if ($FailureMemory.Count -gt 8) {
+        $FailureMemory.RemoveAt(0)
+    }
+}
+
 
 # ------------------ GOAL SANITIZER ------------------
 function Sanitize-Goal {
@@ -98,6 +144,7 @@ if ($Goal -ne $OriginalGoal) {
 
 $RequireRootPath = $RootDir
 Log-Debug "RequireRootPath: $RequireRootPath"
+$FailureMemory = New-Object System.Collections.Generic.List[string]
 
 # ------------------ OLLAMA WAIT ------------------
 function Wait-ForOllama {
@@ -196,6 +243,10 @@ function Normalize-PathString {
 
 # ------------------ PLAN PROMPT ------------------
 function Build-PlanPrompt {
+    $failureNotes = ""
+    if ($FailureMemory.Count -gt 0) {
+        $failureNotes = "Recent failures to avoid:`n- " + ($FailureMemory -join "`n- ")
+    }
 @"
 Return JSON ONLY.
 Schema:
@@ -230,10 +281,18 @@ Rules:
 - Actions must be single-line; if content needs newlines, use \n escapes in the spec.
 - Output must be valid JSON with no stray text, extra numbers, or trailing commas.
 - Do not include raw newlines inside action strings; use \\n escapes only.
+- Escape quotes inside action strings with \\\".
+- Each plan item must have only: step, action, expects.
 - Respect any directory constraints explicitly stated in the goal.
 - Allowed actions only: READ_FILE, READ_PART, WRITE_FILE, APPEND_FILE, WRITE_PATCH, RUN_COMMAND, LIST_DIR, FIND_FILES, SEARCH_TEXT, FOR_EACH, BUILD_REPORT, CREATE_DIR, DELETE_FILE, DELETE_DIR, MOVE_ITEM, COPY_ITEM, RENAME_ITEM, VERIFY_PATH. Do not invent new action types.
 - Do not invent control flow (GOTO/IF/LOOP). Use FOR_EACH only.
 - Only use {item} and {index} placeholders inside FOR_EACH action templates.
+- FOR_EACH format must be exactly: FOR_EACH|<list_key>|<action_template>.
+- list_key must be "FIND:<glob>" or "DIR:<path>".
+- FIND_FILES takes only a glob (no paths).
+- BUILD_REPORT example: BUILD_REPORT|*.ps1|1|40|C:\\agent\\ps1-report.txt|RUN_COMMAND,Write-File
+- FOR_EACH example: FOR_EACH|FIND:*.ps1|READ_PART|{item}|1|40
+$failureNotes
 
 GOAL:
 $Goal
@@ -244,14 +303,23 @@ $Goal
 $start = Get-Date
 $plan = $null
 
-for ($i = 1; $i -le $MaxPlanIterations; $i++) {
+for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
 
-    if ((New-TimeSpan $start (Get-Date)).TotalMinutes -gt $MaxPlanMinutes) {
+    if ($MaxPlanMinutes -gt 0 -and (New-TimeSpan $start (Get-Date)).TotalMinutes -gt $MaxPlanMinutes) {
         throw "Planning timeout"
     }
 
     Write-Host "`n[AGENT] Planning iteration $i..."
     Log-Debug "Planning iteration $i"
+
+    if ($PlannerRejectStreak -ge $EscalateAfterRejects -and $PlannerFallbackIndex -lt ($PlannerFallbacks.Count - 1)) {
+        $PlannerFallbackIndex++
+        $PlannerRejectStreak = 0
+        $PlannerModel = $PlannerFallbacks[$PlannerFallbackIndex].name
+        $PlannerTemp = $PlannerFallbacks[$PlannerFallbackIndex].temp
+        Write-Host "[AGENT] Escalating planner model to $PlannerModel"
+        Log-Debug "Escalated planner model to $PlannerModel"
+    }
 
     $raw = Invoke-Ollama `
         -Model $PlannerModel `
@@ -268,6 +336,8 @@ for ($i = 1; $i -le $MaxPlanIterations; $i++) {
     if (-not $json) {
         Write-Host "[AGENT] Reject: no JSON detected"
         Log-Debug "Reject: no JSON detected"
+        Add-Failure "No JSON detected"
+        $PlannerRejectStreak++
         continue
     }
 
@@ -276,6 +346,8 @@ for ($i = 1; $i -le $MaxPlanIterations; $i++) {
     } catch {
         Write-Host "[AGENT] Reject: invalid JSON"
         Log-Debug "Reject: invalid JSON"
+        Add-Failure "Invalid JSON"
+        $PlannerRejectStreak++
         $repaired = Repair-Json -Text $raw
         Log-Debug-Raw -Label "Planner repaired" -Text $repaired
         if ($repaired) {
@@ -285,13 +357,17 @@ for ($i = 1; $i -le $MaxPlanIterations; $i++) {
                     $candidate = $repairedJson | ConvertFrom-Json
                     Write-Host "[AGENT] Recovered: JSON repaired"
                     Log-Debug "Recovered: JSON repaired"
+                    $PlannerRejectStreak = 0
                 } catch {
+                    $PlannerRejectStreak++
                     continue
                 }
             } else {
+                $PlannerRejectStreak++
                 continue
             }
         } else {
+            $PlannerRejectStreak++
             continue
         }
     }
@@ -322,6 +398,13 @@ for ($i = 1; $i -le $MaxPlanIterations; $i++) {
         }
         if ($p.action -match '^FIND_FILES\|') {
             $glob = $p.action.Split('|',2)[1]
+            if ($glob -match '\s') {
+                $glob = $glob.Split(' ')[0]
+                if ($glob) {
+                    $p.action = "FIND_FILES|$glob"
+                    $normalizedActions = $true
+                }
+            }
             if ($glob -match '[:\\\\/]') {
                 $leaf = Split-Path -Leaf $glob
                 if ($leaf) {
@@ -329,6 +412,10 @@ for ($i = 1; $i -le $MaxPlanIterations; $i++) {
                     $normalizedActions = $true
                 }
             }
+        }
+        if ($p.action -match '^FOR_EACH\|list_key=') {
+            $p.action = $p.action -replace '^FOR_EACH\|list_key=', 'FOR_EACH|'
+            $normalizedActions = $true
         }
         if ($p.action -match "[\r\n]") {
             $p.action = ($p.action -replace "(\r\n|\r|\n)", "\\n")
@@ -353,6 +440,14 @@ for ($i = 1; $i -le $MaxPlanIterations; $i++) {
 
     $allActionsValid = $true
     foreach ($p in $candidate.plan) {
+        $allowedKeys = @("step","action","expects")
+        foreach ($name in $p.PSObject.Properties.Name) {
+            if ($allowedKeys -notcontains $name) {
+                $allActionsValid = $false
+                break
+            }
+        }
+        if (-not $allActionsValid) { break }
         if ($p.action -notmatch '^(READ_FILE|READ_PART|WRITE_FILE|APPEND_FILE|WRITE_PATCH|RUN_COMMAND|LIST_DIR|FIND_FILES|SEARCH_TEXT|FOR_EACH|BUILD_REPORT|CREATE_DIR|DELETE_FILE|DELETE_DIR|MOVE_ITEM|COPY_ITEM|RENAME_ITEM|VERIFY_PATH)\|') {
             $allActionsValid = $false
             break
@@ -367,6 +462,8 @@ for ($i = 1; $i -le $MaxPlanIterations; $i++) {
         $candidate.plan | ForEach-Object { Write-Host " - $($_.action)" }
         Log-Debug "Reject: invalid action format"
         $candidate.plan | ForEach-Object { Log-Debug ("Action: {0}" -f $_.action) }
+        Add-Failure "Invalid action format or extra fields"
+        $PlannerRejectStreak++
         continue
     }
     $pathsValid = $true
@@ -407,6 +504,15 @@ for ($i = 1; $i -le $MaxPlanIterations; $i++) {
                 break
             }
             $tmpl = $parts[2]
+            $listKey = $parts[1]
+            if ($listKey -notmatch '^(FIND:|DIR:)') {
+                $pathsValid = $false
+                break
+            }
+            if ($listKey -match '\s') {
+                $pathsValid = $false
+                break
+            }
             if ($tmpl -notmatch '^(READ_FILE|READ_PART|WRITE_FILE|APPEND_FILE|WRITE_PATCH|RUN_COMMAND|LIST_DIR|SEARCH_TEXT|CREATE_DIR|DELETE_FILE|DELETE_DIR|MOVE_ITEM|COPY_ITEM|RENAME_ITEM|VERIFY_PATH)\|') {
                 $pathsValid = $false
                 break
@@ -433,6 +539,8 @@ for ($i = 1; $i -le $MaxPlanIterations; $i++) {
         $candidate.plan | ForEach-Object { Write-Host " - $($_.action)" }
         Log-Debug "Reject: invalid path"
         $candidate.plan | ForEach-Object { Log-Debug ("Action: {0}" -f $_.action) }
+        Add-Failure "Invalid path"
+        $PlannerRejectStreak++
         continue
     }
     $writeSpecsValid = $true
@@ -455,9 +563,12 @@ for ($i = 1; $i -le $MaxPlanIterations; $i++) {
         $candidate.plan | ForEach-Object { Write-Host " - $($_.action)" }
         Log-Debug "Reject: invalid WRITE_FILE spec"
         $candidate.plan | ForEach-Object { Log-Debug ("Action: {0}" -f $_.action) }
+        Add-Failure "Invalid WRITE_FILE spec"
+        $PlannerRejectStreak++
         continue
     }
     if ($candidate.ready) {
+        $PlannerRejectStreak = 0
         $plan = $candidate
         break
     }
@@ -473,6 +584,9 @@ if ($plan.thinking_summary) {
     Write-Host "`nAGENT THINKING (summary):"
     $plan.thinking_summary | ForEach-Object { Write-Host "- $_" }
 }
+
+Write-Host "`nGOAL RESTATEMENT:"
+Get-GoalSummary | ForEach-Object { Write-Host $_ }
 
 if ($plan.reflection -and $plan.reflection.confidence -ne $null) {
     Write-Host "`nCONFIDENCE: $($plan.reflection.confidence)"
