@@ -1156,20 +1156,41 @@ if ($plan.reflection -and $plan.reflection.confidence -ne $null) {
     Write-Host "`nCONFIDENCE: $($plan.reflection.confidence)"
 }
 
-if ($ConfirmOncePerTask) {
-    $resp = Read-Host "Approve plan? (a=all steps, s=step-by-step, n=cancel)"
-    if ($resp -eq "a") {
-        $ApprovalMode = "all"
-    } elseif ($resp -eq "s") {
-        $ApprovalMode = "step"
-    } else {
-        exit
+    if ($ConfirmOncePerTask) {
+        $resp = Read-Host "Approve plan? (a=all steps, s=step-by-step, n=cancel)"
+        if ($resp -eq "a") {
+            $ApprovalMode = "all"
+        } elseif ($resp -eq "s") {
+            $ApprovalMode = "step"
+        } else {
+            $script:RejectedAction = "Plan approval declined"
+            $reason = Read-Host "Why decline the plan? (optional)"
+            if ($reason) {
+                $script:UserFeedback = $reason
+                Log-Debug ("User feedback: {0}" -f $reason)
+            }
+            $script:ReplanRequested = $true
+        }
     }
-}
 
-if ($ConfirmLowConfidence -and $plan.reflection -and $plan.reflection.confidence -lt $RequireConfidence) {
-    if ((Read-Host "Low confidence. Continue anyway? (y/n)") -ne "y") { exit }
-}
+    if ($ConfirmLowConfidence -and $plan.reflection -and $plan.reflection.confidence -lt $RequireConfidence) {
+        if ((Read-Host "Low confidence. Continue anyway? (y/n)") -ne "y") {
+            $script:RejectedAction = "Low confidence declined"
+            $reason = Read-Host "Why decline the plan? (optional)"
+            if ($reason) {
+                $script:UserFeedback = $reason
+                Log-Debug ("User feedback: {0}" -f $reason)
+            }
+            $script:ReplanRequested = $true
+        }
+    }
+
+    if ($script:ReplanRequested) {
+        $note = "User declined plan"
+        Add-Failure $note
+        Write-Host "[AGENT] Replanning based on user feedback..."
+        continue
+    }
 
 # ------------------ WRITE FILE ------------------
 function Write-File {
