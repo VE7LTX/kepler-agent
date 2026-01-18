@@ -597,6 +597,9 @@ function Build-PlanPrompt {
     if ($lastActions -contains "RUN_COMMAND") {
         $actionRules += "Use PowerShell-native commands only; avoid sh, bash, seq, xargs, grep, awk, sed, cut, head, tail."
         $actionRules += "Do NOT invent cmdlets. If you need computation, write explicit PowerShell expressions inside RUN_COMMAND."
+        if ($Goal -match '(?i)\bprime\b') {
+            $actionRules += "Prime tasks: use a PowerShell loop, e.g. RUN_COMMAND|$n=155;$count=0;$i=1;while($count -lt $n){$i++;$isPrime=$true;for($d=2;$d -le [math]::Sqrt($i);$d++){if($i % $d -eq 0){$isPrime=$false;break}};if($isPrime){$count++}};Write-Output $i"
+        }
     }
     if ($lastActions -contains "FOR_EACH") {
         $actionRules += "FOR_EACH may only operate on existing files or directories discovered earlier in the plan."
@@ -1084,6 +1087,15 @@ while ($true) {
                 $pathsValid = $false
                 $pathRejectDetail = "RUN_COMMAND_UNSUPPORTED: use PowerShell-native commands only."
                 break
+            }
+            $firstToken = ($cmd -split '\s+')[0]
+            if ($firstToken -match '^[A-Za-z]+-[A-Za-z]') {
+                $cmdInfo = Get-Command -Name $firstToken -ErrorAction SilentlyContinue
+                if (-not $cmdInfo) {
+                    $pathsValid = $false
+                    $pathRejectDetail = "RUN_COMMAND_UNKNOWN_CMDLET: '$firstToken' is not a known PowerShell cmdlet."
+                    break
+                }
             }
             $absPaths = [regex]::Matches($cmd, '[A-Za-z]:\\[^"\\s]+')
             foreach ($m in $absPaths) {
