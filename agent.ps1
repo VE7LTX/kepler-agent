@@ -122,6 +122,22 @@ function Log-Debug-Raw {
     Log-Debug ("{0}: {1}" -f $Label, $clean)
 }
 
+function Log-PlanDiff {
+    param(
+        [string[]]$OldActions,
+        [string[]]$NewActions,
+        [int]$Iteration
+    )
+    if (-not $OldActions -or -not $NewActions) { return }
+    $diff = Compare-Object -ReferenceObject $OldActions -DifferenceObject $NewActions
+    if (-not $diff) { return }
+    Log-Debug ("Plan diff (iteration {0}):" -f $Iteration)
+    foreach ($d in $diff) {
+        $kind = if ($d.SideIndicator -eq '=>') { "added" } else { "removed" }
+        Log-Debug ("  {0}: {1}" -f $kind, $d.InputObject)
+    }
+}
+
 # ------------------ GOAL RESTATEMENT ------------------
 function Build-GoalRestatement {
     param([string]$Text)
@@ -185,10 +201,12 @@ function Add-Failure {
 function Set-LastReject {
     param(
         [string]$Reason,
-        [string]$BadOutput
+        [string]$BadOutput,
+        [string]$Detail
     )
     $script:LastRejectReason = $Reason
     $script:LastBadOutput = $BadOutput
+    $script:LastRejectDetail = $Detail
 }
 
 function Truncate-Text {
@@ -220,6 +238,7 @@ $FailureMemory = New-Object System.Collections.Generic.List[string]
 $GoalRestatement = Get-GoalSummary
 $LastBadOutput = $null
 $LastRejectReason = $null
+$LastRejectDetail = $null
 
 # ------------------ OLLAMA WAIT ------------------
 function Wait-ForOllama {
@@ -434,7 +453,11 @@ function Build-PlanPrompt {
     }
     $badOutputNotes = ""
     if ($script:LastBadOutput) {
-        $badOutputNotes = "BAD_OUTPUT:`n" + (Truncate-Text -Text $script:LastBadOutput -Max 2000) + "`nWHY_REJECTED:`n" + $script:LastRejectReason
+        $detail = ""
+        if ($script:LastRejectDetail) {
+            $detail = "`nDETAIL:`n" + $script:LastRejectDetail
+        }
+        $badOutputNotes = "BAD_OUTPUT:`n" + (Truncate-Text -Text $script:LastBadOutput -Max 2000) + "`nWHY_REJECTED:`n" + $script:LastRejectReason + $detail
     }
     $goalNotes = ""
     if ($GoalRestatement) {
@@ -494,6 +517,13 @@ Rules:
 - Prefer LIST_DIR or FIND_FILES to discover files, then READ_FILE/READ_PART before WRITE_FILE when editing an existing file.
 - For multi-file tasks, use FOR_EACH with a list key from LIST_DIR or FIND_FILES.
 - For fixed-count tasks (e.g., create N items), use REPEAT.
+- Creation must be explicit. Do NOT use FOR_EACH to create new directories or files.
+- FOR_EACH may only operate on existing files or directories discovered earlier in the plan.
+- Do NOT combine discovery (FIND_FILES/LIST_DIR) with creation of new entities in the same step.
+- Do NOT use parent traversal (e.g., {item}\.. or ..) in any path.
+- If the count is small and fixed, write explicit CREATE_DIR/WRITE_FILE steps.
+- {item} expands to a full absolute path from LIST_DIR/FIND_FILES. Do not treat it as a basename.
+- REPEAT index is zero-based. Use {index} or {index:03d} for padding.
 - Avoid destructive commands.
 - Use absolute Windows paths or workspace-relative paths under C:\agent only.
 - Do not use placeholders like "<path>" or "/path/to/...".
@@ -533,6 +563,7 @@ while ($true) {
     $plan = $null
     $script:ReplanRequested = $false
     $script:RejectedAction = $null
+    $lastPlanActions = $null
 
     for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
 
@@ -578,7 +609,7 @@ while ($true) {
         Write-Host "[AGENT] Reject: planner call failed"
         Log-Debug "Reject: planner call failed"
         Add-Failure "Planner call failed"
-        Set-LastReject -Reason "Planner call failed" -BadOutput ""
+        Set-LastReject -Reason "Planner call failed" -BadOutput "" -Detail "Model returned empty response."
         $PlannerRejectStreak++
         Write-Host "[AGENT] Waiting $ModelRetryDelaySeconds seconds before retry..."
         Start-Sleep -Seconds $ModelRetryDelaySeconds
@@ -602,7 +633,7 @@ while ($true) {
         Write-Host "[AGENT] Reject: no JSON detected"
         Log-Debug "Reject: no JSON detected"
         Add-Failure "No JSON detected"
-        Set-LastReject -Reason "No JSON detected" -BadOutput $rawClean
+        Set-LastReject -Reason "No JSON detected" -BadOutput $rawClean -Detail "No <json>...</json> block found."
         $PlannerRejectStreak++
         continue
     }
@@ -613,7 +644,7 @@ while ($true) {
         Write-Host "[AGENT] Reject: invalid JSON"
         Log-Debug "Reject: invalid JSON"
         Add-Failure "Invalid JSON"
-        Set-LastReject -Reason "Invalid JSON" -BadOutput $rawClean
+        Set-LastReject -Reason "Invalid JSON" -BadOutput $rawClean -Detail "ConvertFrom-Json failed."
         $PlannerRejectStreak++
         $repaired = Repair-Json -Text $rawClean
         Log-Debug-Raw -Label "Planner repaired" -Text $repaired
@@ -712,44 +743,62 @@ while ($true) {
         Log-Debug "Normalized action(s)"
     }
 
+    $currentActions = $candidate.plan | ForEach-Object { $_.action }
+    Log-PlanDiff -OldActions $lastPlanActions -NewActions $currentActions -Iteration $i
+    $lastPlanActions = $currentActions
+
     $allActionsValid = $true
+    $actionRejectDetail = $null
     foreach ($p in $candidate.plan) {
         $allowedKeys = @("step","action","expects")
         foreach ($name in $p.PSObject.Properties.Name) {
             if ($allowedKeys -notcontains $name) {
                 $allActionsValid = $false
+                $actionRejectDetail = "EXTRA_FIELDS: unexpected key '$name'."
                 break
             }
         }
         if (-not $allActionsValid) { break }
+        if (-not $p.PSObject.Properties.Name -contains "action") {
+            $allActionsValid = $false
+            $actionRejectDetail = "MISSING_ACTION: plan item missing action."
+            break
+        }
         if (-not $p.expects) {
             $p | Add-Member -NotePropertyName expects -NotePropertyValue "string" -Force
             $normalizedActions = $true
         }
         if ($p.action -notmatch '^FOR_EACH\|' -and $p.action -match '\{item\}') {
             $allActionsValid = $false
+            $actionRejectDetail = "PLACEHOLDER_MISUSE: {item} used outside FOR_EACH."
             break
         }
         if ($p.action -notmatch '^(READ_FILE|READ_PART|WRITE_FILE|APPEND_FILE|WRITE_PATCH|RUN_COMMAND|LIST_DIR|FIND_FILES|SEARCH_TEXT|FOR_EACH|REPEAT|BUILD_REPORT|CREATE_DIR|DELETE_FILE|DELETE_DIR|MOVE_ITEM|COPY_ITEM|RENAME_ITEM|VERIFY_PATH)\|') {
             $allActionsValid = $false
+            $actionRejectDetail = "UNKNOWN_ACTION: '$($p.action)'."
             break
         }
         if ($p.action -match "[\r\n]") {
             $allActionsValid = $false
+            $actionRejectDetail = "MULTILINE_ACTION: action must be single-line."
             break
         }
     }
     if (-not $allActionsValid) {
         Write-Host "[AGENT] Reject: invalid action format"
-        $candidate.plan | ForEach-Object { Write-Host " - $($_.action)" }
+        $candidate.plan | ForEach-Object { Write-Host " - $($_.action)" }       
         Log-Debug "Reject: invalid action format"
+        if ($actionRejectDetail) {
+            Log-Debug ("Reject detail: {0}" -f $actionRejectDetail)
+        }
         $candidate.plan | ForEach-Object { Log-Debug ("Action: {0}" -f $_.action) }
         Add-Failure "Invalid action format or extra fields"
-        Set-LastReject -Reason "Invalid action format or extra fields" -BadOutput $rawClean
+        Set-LastReject -Reason "Invalid action format or extra fields" -BadOutput $rawClean -Detail $actionRejectDetail
         $PlannerRejectStreak++
         continue
     }
     $pathsValid = $true
+    $pathRejectDetail = $null
     $findGlobs = New-Object System.Collections.Generic.HashSet[string]
     $dirLists = New-Object System.Collections.Generic.HashSet[string]
     foreach ($p in $candidate.plan) {
@@ -762,16 +811,24 @@ while ($true) {
                 $pathIndex = 4
             }
             $path = $p.action.Split('|',6)[$pathIndex]
+            if ($path -match '\.\.' ) {
+                $pathsValid = $false
+                $pathRejectDetail = "PATH_TRAVERSAL: '..' not allowed in path."
+                break
+            }
             if ($path -match '<path>|/path/to' -or $path -match '^(?i)/home/|^/|\\?/') {
                 $pathsValid = $false
+                $pathRejectDetail = "PLACEHOLDER_OR_UNIX_PATH: invalid placeholder or Unix-style path."
                 break
             }
             if ($path -notmatch '^(?i)[A-Za-z]:\\|^\\\\|^\\.|^\\.\\') {
                 $pathsValid = $false
+                $pathRejectDetail = "NOT_ABSOLUTE: path is not absolute."
                 break
             }
             if ($RequireRootPath -and ($path -notmatch ('^(?i)' + [regex]::Escape($RequireRootPath)))) {
                 $pathsValid = $false
+                $pathRejectDetail = "OUTSIDE_ROOT: path must stay under $RequireRootPath."
                 break
             }
         }
@@ -779,6 +836,7 @@ while ($true) {
             $glob = $p.action.Split('|',2)[1]
             if ($glob -match '[:\\\\/]') {
                 $pathsValid = $false
+                $pathRejectDetail = "INVALID_GLOB: FIND_FILES glob must not include paths."
                 break
             }
             $findGlobs.Add($glob) | Out-Null
@@ -797,24 +855,34 @@ while ($true) {
             $listKey = $parts[1]
             if ($listKey -notmatch '^(FIND:|DIR:)') {
                 $pathsValid = $false
+                $pathRejectDetail = "LIST_KEY_FORMAT: list key must be FIND:<glob> or DIR:<path>."
                 break
             }
             if ($listKey -match '\s') {
                 $pathsValid = $false
+                $pathRejectDetail = "LIST_KEY_SPACES: list key must not contain spaces."
                 break
             }
             if ($tmpl -notmatch '^(READ_FILE|READ_PART|WRITE_FILE|APPEND_FILE|WRITE_PATCH|RUN_COMMAND|LIST_DIR|SEARCH_TEXT|CREATE_DIR|DELETE_FILE|DELETE_DIR|MOVE_ITEM|COPY_ITEM|RENAME_ITEM|VERIFY_PATH)\|') {
                 $pathsValid = $false
+                $pathRejectDetail = "TEMPLATE_ACTION_INVALID: FOR_EACH template action is not allowed."
+                break
+            }
+            if ($tmpl -match '^CREATE_DIR\|') {
+                $pathsValid = $false
+                $pathRejectDetail = "FOR_EACH_CREATE: creation must be explicit; do not create directories inside FOR_EACH."
                 break
             }
             if ($tmpl -notmatch '\{item\}') {
                 $pathsValid = $false
+                $pathRejectDetail = "TEMPLATE_MISSING_ITEM: FOR_EACH template must include {item}."
                 break
             }
             if ($listKey -match '^FIND:(.+)$') {
                 $glob = $matches[1]
                 if (-not $findGlobs.Contains($glob)) {
                     $pathsValid = $false
+                    $pathRejectDetail = "MISSING_LIST: FIND list was not created earlier."
                     break
                 }
             }
@@ -822,6 +890,7 @@ while ($true) {
                 $dir = $matches[1]
                 if (-not $dirLists.Contains($dir)) {
                     $pathsValid = $false
+                    $pathRejectDetail = "MISSING_LIST: DIR list was not created earlier."
                     break
                 }
             }
@@ -835,15 +904,18 @@ while ($true) {
             $count = $parts[1]
             if ($count -notmatch '^\d+$') {
                 $pathsValid = $false
+                $pathRejectDetail = "REPEAT_COUNT: count must be an integer."
                 break
             }
             $tmpl = $parts[2]
             if ($tmpl -notmatch '^(READ_FILE|READ_PART|WRITE_FILE|APPEND_FILE|WRITE_PATCH|RUN_COMMAND|LIST_DIR|SEARCH_TEXT|CREATE_DIR|DELETE_FILE|DELETE_DIR|MOVE_ITEM|COPY_ITEM|RENAME_ITEM|VERIFY_PATH)\|') {
                 $pathsValid = $false
+                $pathRejectDetail = "REPEAT_TEMPLATE_ACTION_INVALID: template action is not allowed."
                 break
             }
             if ($tmpl -notmatch '\{index(:0+\d+d)?\}') {
                 $pathsValid = $false
+                $pathRejectDetail = "REPEAT_TEMPLATE_MISSING_INDEX: template must include {index}."
                 break
             }
             $tmplParts = $tmpl.Split('|',4)
@@ -855,14 +927,17 @@ while ($true) {
                 $tmplPath = [regex]::Replace($tmplPath, "\{index(:0+\d+d)?\}", "0")
                 if ($tmplPath -match '<path>|/path/to' -or $tmplPath -match '^(?i)/home/|^/|\\?/') {
                     $pathsValid = $false
+                    $pathRejectDetail = "PLACEHOLDER_OR_UNIX_PATH: invalid placeholder or Unix-style path."
                     break
                 }
                 if ($tmplPath -notmatch '^(?i)[A-Za-z]:\\|^\\\\|^\\.|^\\.\\') {
                     $pathsValid = $false
+                    $pathRejectDetail = "NOT_ABSOLUTE: path is not absolute."
                     break
                 }
                 if ($RequireRootPath -and ($tmplPath -notmatch ('^(?i)' + [regex]::Escape($RequireRootPath)))) {
                     $pathsValid = $false
+                    $pathRejectDetail = "OUTSIDE_ROOT: path must stay under $RequireRootPath."
                     break
                 }
             }
@@ -881,11 +956,14 @@ while ($true) {
     }
     if (-not $pathsValid) {
         Write-Host "[AGENT] Reject: invalid path"
-        $candidate.plan | ForEach-Object { Write-Host " - $($_.action)" }
+        $candidate.plan | ForEach-Object { Write-Host " - $($_.action)" }       
         Log-Debug "Reject: invalid path"
+        if ($pathRejectDetail) {
+            Log-Debug ("Reject detail: {0}" -f $pathRejectDetail)
+        }
         $candidate.plan | ForEach-Object { Log-Debug ("Action: {0}" -f $_.action) }
         Add-Failure "Invalid path"
-        Set-LastReject -Reason "Invalid path" -BadOutput $rawClean
+        Set-LastReject -Reason "Invalid path" -BadOutput $rawClean -Detail $pathRejectDetail
         $PlannerRejectStreak++
         continue
     }
@@ -906,11 +984,12 @@ while ($true) {
     }
     if (-not $writeSpecsValid) {
         Write-Host "[AGENT] Reject: invalid WRITE_FILE spec"
-        $candidate.plan | ForEach-Object { Write-Host " - $($_.action)" }
+        $candidate.plan | ForEach-Object { Write-Host " - $($_.action)" }       
         Log-Debug "Reject: invalid WRITE_FILE spec"
+        Log-Debug "Reject detail: WRITE_FILE spec too short or contains placeholders."
         $candidate.plan | ForEach-Object { Log-Debug ("Action: {0}" -f $_.action) }
         Add-Failure "Invalid WRITE_FILE spec"
-        Set-LastReject -Reason "Invalid WRITE_FILE spec" -BadOutput $rawClean
+        Set-LastReject -Reason "Invalid WRITE_FILE spec" -BadOutput $rawClean -Detail "WRITE_FILE spec is too short or contains placeholders."
         $PlannerRejectStreak++
         continue
     }

@@ -3,8 +3,8 @@
 The planner can only emit actions from a fixed list. Each action is a single-line string in the plan. Multi-file work uses `FOR_EACH` or `BUILD_REPORT`.
 
 ## Core Actions
-- `LIST_DIR|<path>`: List entries in a directory (max 200). Stores a list keyed as `DIR:<path>`.
-- `FIND_FILES|<glob>`: Find files by glob (max 200). Stores a list keyed as `FIND:<glob>`.
+- `LIST_DIR|<path>`: List entries in a directory (max 200). Stores full paths keyed as `DIR:<path>`.
+- `FIND_FILES|<glob>`: Find files by glob (max 200). Stores full paths keyed as `FIND:<glob>`.
 - `READ_FILE|<path>`: Load a full file into context.
 - `READ_PART|<path>|<start>|<count>`: Load a slice of a file by line number.
 - `SEARCH_TEXT|<pattern>|<path>`: Search within a file or path for matches (max 200).
@@ -16,8 +16,10 @@ The planner can only emit actions from a fixed list. Each action is a single-lin
 ## Looping and Batch Actions
 - `FOR_EACH|<list_key>|<action_template>`
   - Iterates over a list created by `LIST_DIR` or `FIND_FILES`.
-  - Templates may include `{item}` and `{index}` placeholders.
+  - `{item}` expands to the full absolute path of each list entry.
+  - `{index}` is zero-based. Use `{index:03d}` for zero padding.
   - `list_key` must be `DIR:<path>` or `FIND:<glob>` that already exists in the plan.
+  - Do not use `CREATE_DIR` inside `FOR_EACH`; creation must be explicit.
 - `REPEAT|<count>|<action_template>`
   - Runs the template a fixed number of times.
   - Use `{index}` or `{index:03d}` in the template for zero-padded numbering.

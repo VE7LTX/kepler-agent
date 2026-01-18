@@ -18,6 +18,8 @@ The planner receives a strict JSON template and a fixed action schema. The promp
 - Only these keys are allowed: `goal`, `thinking_summary`, `reflection`, `ready`, `plan`.
 - Each plan item must contain only `step`, `action`, and `expects`.
 - Actions must be single-line strings with no raw newlines.
+- `{item}` is treated as a full absolute path (not a basename).
+- `REPEAT` index is zero-based; use `{index:03d}` for padding.
 
 ## 4) Validation and Repair
 The agent validates:
@@ -26,6 +28,7 @@ The agent validates:
 - Path safety (must remain under `C:\agent\`)
 - `WRITE_FILE` content must be real text (not placeholders)
 - `FOR_EACH` list keys must already exist
+- `FOR_EACH` may not use `CREATE_DIR` (creation must be explicit)
 
 If JSON is invalid, the agent attempts a repair pass and retries.
 
@@ -57,3 +60,4 @@ If a step is declined, the agent asks why, saves the feedback, and replans.
 - Planner response time is printed each iteration.
 - Each action prints elapsed time.
 - Full prompts and outputs are logged to `C:\agent\agent-debug.log`.
+- Plan diffs between iterations are logged to show what changed.
