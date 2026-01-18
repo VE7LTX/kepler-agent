@@ -30,6 +30,7 @@ All settings live near the top of `agent.ps1`. These control model selection, ti
 - `DebugLogPath`: Path to the debug log.
 - `DebugLogFull`: If true, log full prompts and outputs.
 - `DebugLogPretty`: If true, log in multi-line format.
+- `DebugVerbose`: If true, log trace-level function activity.
 - `RequireJsonTags`: Reject plans not wrapped in `<json>...</json>` tags.
 - `EnableSpinner`: Show a spinner while models are running.
 - `EnableFailureReflection`: Toggle fast failure reflection output.

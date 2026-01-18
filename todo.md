@@ -36,6 +36,7 @@
 - Log plan diffs between iterations (what changed and why). (done)
 - Add fast failure reflection before retries and surface output to user. (done)
 - Add pre-step check summaries between actions. (done)
+- Add trace-level logging for function entry and key parameters. (done)
 
 ## Example Plan (for reference)
 - CREATE_DIR|C:\agent\new000

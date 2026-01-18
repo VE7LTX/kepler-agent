@@ -81,6 +81,7 @@ $DebugLogPath = "C:\agent\agent-debug.log"
 $DebugLogMaxChars = 2000
 $DebugLogFull = $true
 $DebugLogPretty = $true
+$DebugVerbose = $true
 $RequireJsonTags = $true
 $EnableSpinner = $true
 $RootDir = "C:\agent\"
@@ -132,6 +133,16 @@ function Log-Debug-Raw {
     }
     $clean = $clean -replace "(\r\n|\r|\n)", "\n"
     Log-Debug ("{0}: {1}" -f $Label, $clean)
+}
+
+function Log-Trace {
+    param(
+        [string]$Where,
+        [string]$Message
+    )
+    if (-not $DebugVerbose) { return }
+    if (-not $Message) { $Message = "<empty>" }
+    Log-Debug ("TRACE [{0}] {1}" -f $Where, $Message)
 }
 
 function Log-PlanDiff {
@@ -366,6 +377,7 @@ function Invoke-Ollama-Spinner {
         [hashtable]$Options,
         [string]$Label = "Model"
     )
+    Log-Trace -Where "Invoke-Ollama-Spinner" -Message ("label='{0}' model='{1}' prompt_len={2} system_len={3} opts='{4}'" -f $Label, $Model, ($Prompt.Length), ($System.Length), ($Options | ConvertTo-Json -Compress))
 
     if (-not $EnableSpinner) {
         return Invoke-Ollama -Model $Model -Prompt $Prompt -System $System -Options $Options
@@ -499,6 +511,7 @@ function Normalize-PathString {
     param([string]$Path)
 
     if (-not $Path) { return $Path }
+    Log-Trace -Where "Normalize-PathString" -Message ("in='{0}'" -f $Path)
     $p = $Path -replace '/', '\'
     if ($p -match '^[A-Za-z]:\\\\+') {
         $p = $p -replace '^[A-Za-z]:\\\\+', { param($m) $m.Value.Substring(0,3) }
@@ -1136,6 +1149,7 @@ function Write-File {
     param([string]$Path, [string]$Spec)
 
     $Path = Normalize-PathString -Path $Path
+    Log-Trace -Where "Write-File" -Message ("path='{0}' spec_len={1}" -f $Path, $Spec.Length)
     if ($Path -match '<path>|/path/to') {
         Write-Host "[WRITER] Invalid placeholder path: $Path"
         return
@@ -1203,6 +1217,7 @@ function Read-File {
     param([string]$Path)
 
     $Path = Normalize-PathString -Path $Path
+    Log-Trace -Where "Read-File" -Message ("path='{0}'" -f $Path)
     if ($Path -match '<path>|/path/to') {
         Write-Host "[READER] Invalid placeholder path: $Path"
         return
@@ -1226,6 +1241,7 @@ function Verify-Path {
     param([string]$Path)
 
     $Path = Normalize-PathString -Path $Path
+    Log-Trace -Where "Verify-Path" -Message ("path='{0}'" -f $Path)
     if ($Path -match '<path>|/path/to') {
         Write-Host "[VERIFY] Invalid placeholder path: $Path"
         return
@@ -1246,6 +1262,7 @@ function Create-Dir {
     param([string]$Path)
 
     $Path = Normalize-PathString -Path $Path
+    Log-Trace -Where "Create-Dir" -Message ("path='{0}'" -f $Path)
     if ($Path -match '<path>|/path/to') {
         Write-Host "[CREATE] Invalid placeholder path: $Path"
         return
@@ -1263,6 +1280,7 @@ function Delete-File {
     param([string]$Path)
 
     $Path = Normalize-PathString -Path $Path
+    Log-Trace -Where "Delete-File" -Message ("path='{0}'" -f $Path)
     if ($Path -match '<path>|/path/to') {
         Write-Host "[DELETE] Invalid placeholder path: $Path"
         return
@@ -1284,6 +1302,7 @@ function Delete-Dir {
     param([string]$Path)
 
     $Path = Normalize-PathString -Path $Path
+    Log-Trace -Where "Delete-Dir" -Message ("path='{0}'" -f $Path)
     if ($Path -match '<path>|/path/to') {
         Write-Host "[DELETE] Invalid placeholder path: $Path"
         return
@@ -1309,7 +1328,8 @@ function Move-ItemSafe {
 
     $Source = Normalize-PathString -Path $Source
     $Dest = Normalize-PathString -Path $Dest
-    if ($Source -match '<path>|/path/to' -or $Dest -match '<path>|/path/to') {
+    Log-Trace -Where "Move-ItemSafe" -Message ("src='{0}' dest='{1}'" -f $Source, $Dest)
+    if ($Source -match '<path>|/path/to' -or $Dest -match '<path>|/path/to') {  
         Write-Host "[MOVE] Invalid placeholder path"
         return
     }
@@ -1334,7 +1354,8 @@ function Copy-ItemSafe {
 
     $Source = Normalize-PathString -Path $Source
     $Dest = Normalize-PathString -Path $Dest
-    if ($Source -match '<path>|/path/to' -or $Dest -match '<path>|/path/to') {
+    Log-Trace -Where "Copy-ItemSafe" -Message ("src='{0}' dest='{1}'" -f $Source, $Dest)
+    if ($Source -match '<path>|/path/to' -or $Dest -match '<path>|/path/to') {  
         Write-Host "[COPY] Invalid placeholder path"
         return
     }
@@ -1359,7 +1380,8 @@ function Rename-ItemSafe {
 
     $Source = Normalize-PathString -Path $Source
     $Dest = Normalize-PathString -Path $Dest
-    if ($Source -match '<path>|/path/to' -or $Dest -match '<path>|/path/to') {
+    Log-Trace -Where "Rename-ItemSafe" -Message ("src='{0}' dest='{1}'" -f $Source, $Dest)
+    if ($Source -match '<path>|/path/to' -or $Dest -match '<path>|/path/to') {  
         Write-Host "[RENAME] Invalid placeholder path"
         return
     }
@@ -1380,6 +1402,7 @@ function List-Dir {
     param([string]$Path)
 
     $Path = Normalize-PathString -Path $Path
+    Log-Trace -Where "List-Dir" -Message ("path='{0}'" -f $Path)
     if ($Path -match '<path>|/path/to') {
         Write-Host "[LISTER] Invalid placeholder path: $Path"
         return
@@ -1407,6 +1430,7 @@ function Find-Files {
         Write-Host "[FINDER] Missing glob"
         return
     }
+    Log-Trace -Where "Find-Files" -Message ("glob='{0}'" -f $Glob)
 
     $items = Get-ChildItem -Path $RootDir -Recurse -File -Filter $Glob -ErrorAction SilentlyContinue | Select-Object -First 200 -ExpandProperty FullName
     $list = $items -join "`n"
@@ -1422,6 +1446,7 @@ function Search-Text {
     )
 
     $Path = Normalize-PathString -Path $Path
+    Log-Trace -Where "Search-Text" -Message ("pattern='{0}' path='{1}'" -f $Pattern, $Path)
     if ($Path -match '<path>|/path/to') {
         Write-Host "[SEARCH] Invalid placeholder path: $Path"
         return
@@ -1452,6 +1477,7 @@ function Read-Part {
     )
 
     $Path = Normalize-PathString -Path $Path
+    Log-Trace -Where "Read-Part" -Message ("path='{0}' start={1} count={2}" -f $Path, $Start, $Count)
     if ($Path -match '<path>|/path/to') {
         Write-Host "[READER] Invalid placeholder path: $Path"
         return
@@ -1483,6 +1509,7 @@ function Append-File {
     )
 
     $Path = Normalize-PathString -Path $Path
+    Log-Trace -Where "Append-File" -Message ("path='{0}' text_len={1}" -f $Path, $Text.Length)
     if ($Path -match '<path>|/path/to') {
         Write-Host "[APPEND] Invalid placeholder path: $Path"
         return
@@ -1505,6 +1532,7 @@ function Write-Patch {
     )
 
     $Path = Normalize-PathString -Path $Path
+    Log-Trace -Where "Write-Patch" -Message ("path='{0}' diff_len={1}" -f $Path, $Diff.Length)
     if ($Path -match '<path>|/path/to') {
         Write-Host "[PATCH] Invalid placeholder path: $Path"
         return
@@ -1541,9 +1569,10 @@ function Build-Report {
         [int]$Count,
         [string]$OutPath,
         [string]$Patterns
-    )
+    ) 
 
     $OutPath = Normalize-PathString -Path $OutPath
+    Log-Trace -Where "Build-Report" -Message ("glob='{0}' start={1} count={2} out='{3}' patterns='{4}'" -f $Glob, $Start, $Count, $OutPath, $Patterns)
     if ($OutPath -match '<path>|/path/to') {
         Write-Host "[REPORT] Invalid placeholder path: $OutPath"
         return
@@ -1592,6 +1621,7 @@ function Invoke-ForEachAction {
         [string]$ListKey,
         [string]$Template
     )
+    Log-Trace -Where "Invoke-ForEachAction" -Message ("list='{0}' template='{1}'" -f $ListKey, $Template)
 
     $listText = $null
     foreach ($k in @($ListKey, "FIND:$ListKey", "DIR:$ListKey")) {
@@ -1625,6 +1655,7 @@ function Invoke-RepeatAction {
         [int]$Count,
         [string]$Template
     )
+    Log-Trace -Where "Invoke-RepeatAction" -Message ("count={0} template='{1}'" -f $Count, $Template)
     for ($idx = 0; $idx -lt $Count; $idx++) {
         $action = $Template.Replace("{index}", $idx)
         $action = [regex]::Replace($action, "\{index:0+(\d+)d\}", {
@@ -1640,6 +1671,7 @@ function Invoke-RepeatAction {
 function Execute-Action {
     param([string]$Action)
 
+    Log-Trace -Where "Execute-Action" -Message ("action='{0}'" -f $Action)
     if ($EnableStepChecks) {
         $checkPrompt = @"
 Provide a short, visible pre-step check.
@@ -1828,6 +1860,7 @@ $Action
 function Run-Command {
     param([string]$Command)
 
+    Log-Trace -Where "Run-Command" -Message ("command='{0}'" -f $Command)
     if ($Command -match '(?i)\b(sh|bash|zsh|seq|xargs|grep|awk|sed|cut|head|tail)\b') {
         Write-Host "[RUNNER] Blocked non-PowerShell command: $Command"
         return
@@ -1859,6 +1892,7 @@ function Confirm-Action {
         [string]$Detail
     )
 
+    Log-Trace -Where "Confirm-Action" -Message ("kind='{0}' detail='{1}'" -f $Kind, $Detail)
     if ($ApprovalMode -eq "all") { return $true }
     if (-not $ConfirmRiskyActions) { return $true }
     $resp = Read-Host "Approve $Kind? $Detail (y/n)"
