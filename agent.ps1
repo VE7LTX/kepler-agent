@@ -622,7 +622,7 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
         }
         if (-not $allActionsValid) { break }
         if (-not $p.expects) {
-            $p.expects = "string"
+            $p | Add-Member -NotePropertyName expects -NotePropertyValue "string" -Force
             $normalizedActions = $true
         }
         if ($p.action -notmatch '^(READ_FILE|READ_PART|WRITE_FILE|APPEND_FILE|WRITE_PATCH|RUN_COMMAND|LIST_DIR|FIND_FILES|SEARCH_TEXT|FOR_EACH|BUILD_REPORT|CREATE_DIR|DELETE_FILE|DELETE_DIR|MOVE_ITEM|COPY_ITEM|RENAME_ITEM|VERIFY_PATH)\|') {
