@@ -89,6 +89,12 @@ $ModelRetryDelaySeconds = 8
 $AgentName = "Kepler"
 $AgentBackstory = "Kepler is a local Ollama-powered agent orchestrated by a PowerShell runner. It plans in strict JSON, validates actions, and executes only within C:\\agent\\ with human approval."
 
+if (Test-Path $DebugLogPath) {
+    Clear-Content -Path $DebugLogPath
+} else {
+    "" | Out-File -FilePath $DebugLogPath -Encoding utf8
+}
+
 # ------------------ GOAL ------------------
 $OriginalGoal = Read-Host "Enter goal"
 
