@@ -34,6 +34,7 @@ This section lists common failures, why they happen, and what to check.
 - **RUN_COMMAND failed**
   - The command crashed or referenced a missing cmdlet.
   - Fix: use explicit PowerShell expressions and avoid invented commands.
+  - The runner will replan if the command starts with an unknown `Verb-Noun` cmdlet.
 
 - **Long delays**
   - Larger models can take 30-90 seconds per planning call.

@@ -1867,6 +1867,19 @@ function Run-Command {
         return
     }
 
+    $firstToken = ($Command -split '\s+')[0]
+    if ($firstToken -match '^[A-Za-z]+-[A-Za-z]') {
+        $cmd = Get-Command -Name $firstToken -ErrorAction SilentlyContinue
+        if (-not $cmd) {
+            $msg = "Unknown cmdlet: $firstToken"
+            Write-Host "[RUNNER] $msg"
+            Log-Debug ("RUN_COMMAND failed: {0}" -f $msg)
+            $script:UserFeedback = $msg + ". Use explicit PowerShell expressions inside RUN_COMMAND."
+            $script:ReplanRequested = $true
+            return
+        }
+    }
+
     $absPaths = [regex]::Matches($Command, '[A-Za-z]:\\[^"\\s]+')
     foreach ($m in $absPaths) {
         if ($RequireRootPath -and ($m.Value -notmatch ('^(?i)' + [regex]::Escape($RequireRootPath)))) {
