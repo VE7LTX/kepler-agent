@@ -9,6 +9,8 @@ The planner can only emit actions from a fixed list. Each action is a single-lin
 - `READ_PART|<path>|<start>|<count>`: Load a slice of a file by line number.
 - `SEARCH_TEXT|<pattern>|<path>`: Search within a file or path for matches (max 200).
 - `WRITE_FILE|<path>|<content>`: Write full file contents. Content must be real text, not a placeholder.
+  - The content must appear after the second pipe in the action string. The `expects` field is ignored for file contents.
+  - To create an empty file, use `WRITE_FILE|<path>|EMPTY_FILE`.
 - `APPEND_FILE|<path>|<text>`: Append text to an existing file.
 - `WRITE_PATCH|<path>|<diff>`: Apply a unified diff (via `git apply` or `patch`).
 - `RUN_COMMAND|<command>`: Run a command. Any paths must stay under `C:\agent\`.
@@ -52,6 +54,12 @@ The planner can only emit actions from a fixed list. Each action is a single-lin
 ## Examples
 Create numbered folders:
 - `REPEAT|3|CREATE_DIR|C:\agent\new{index:03d}`
+
+Write a file with content:
+- `WRITE_FILE|C:\agent\notes.txt|Hello from Kepler`
+
+Write an empty file:
+- `WRITE_FILE|C:\agent\empty.txt|EMPTY_FILE`
 
 Scan scripts and report:
 - `BUILD_REPORT|*.ps1|1|40|C:\agent\ps1-report.txt|RUN_COMMAND,Write-File`

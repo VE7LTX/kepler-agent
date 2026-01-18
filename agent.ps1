@@ -609,6 +609,9 @@ function Build-PlanPrompt {
     }
     if ($lastActions -contains "WRITE_FILE") {
         $actionRules += "WRITE_FILE spec must be real content, not metadata or placeholders."
+        $actionRules += "WRITE_FILE content must be in the action string after the second pipe; expects is not used to write files."
+        $actionRules += "Example: WRITE_FILE|C:\\agent\\notes.txt|Hello from Kepler"
+        $actionRules += "To create an empty file, use WRITE_FILE|<path>|EMPTY_FILE."
     }
     if ($lastActions -contains "LIST_DIR" -or $lastActions -contains "FIND_FILES") {
         $actionRules += "Do NOT combine discovery (FIND_FILES/LIST_DIR) with creation of new entities in the same step."
@@ -1102,8 +1105,10 @@ while ($true) {
             }
             $absPaths = [regex]::Matches($cmd, '[A-Za-z]:\\[^"\\s]+')
             foreach ($m in $absPaths) {
-                if ($RequireRootPath -and ($m.Value -notmatch ('^(?i)' + [regex]::Escape($RequireRootPath)))) {
+                $candidatePath = $m.Value.TrimEnd(')',']','}',';',',','.')
+                if ($RequireRootPath -and ($candidatePath -notmatch ('^(?i)' + [regex]::Escape($RequireRootPath)))) {
                     $pathsValid = $false
+                    $pathRejectDetail = "RUN_COMMAND_OUTSIDE_ROOT: absolute path must stay under $RequireRootPath."
                     break
                 }
             }
@@ -1133,6 +1138,8 @@ while ($true) {
                 break
             }
             $spec = $parts[2].Trim()
+            $specTrim = $spec.Trim("'\"")
+            if ($specTrim -ieq "EMPTY_FILE") { continue }
             if ($spec.Length -lt 10 -or $spec -match '(?i)\btext/plain\b|<spec>|<content>|<file>') {
                 $writeSpecsValid = $false
                 break
@@ -1233,6 +1240,12 @@ function Write-File {
         } elseif ($Spec.StartsWith('"') -and $Spec.EndsWith('"')) {
             $Spec = $Spec.Substring(1, $Spec.Length - 2)
         }
+    }
+    $specTrim = $Spec.Trim()
+    if ($specTrim -ieq "EMPTY_FILE") {
+        Log-Trace -Where "Write-File" -Message "EMPTY_FILE spec detected; writing empty file."
+        New-Item -ItemType File -Path $Path -Force | Out-Null
+        return
     }
 
     $contextText = ""

@@ -15,6 +15,11 @@ This section lists common failures, why they happen, and what to check.
   - A path is outside `C:\agent\` or contains placeholders like `<path>`.
   - Fix: use absolute Windows paths under `C:\agent\` only.
 
+- **Invalid WRITE_FILE spec**
+  - The plan used `WRITE_FILE` without content after the second pipe, or used placeholder text.
+  - Fix: put the content directly in the action string (e.g., `WRITE_FILE|C:\agent\file.txt|Hello`).
+  - For empty files, use `WRITE_FILE|C:\agent\file.txt|EMPTY_FILE`.
+
 - **Missing list**
   - A `FOR_EACH` list key was used before it was created.
   - Fix: add a `LIST_DIR` or `FIND_FILES` step earlier in the plan.
@@ -35,6 +40,10 @@ This section lists common failures, why they happen, and what to check.
   - The command crashed or referenced a missing cmdlet.
   - Fix: use explicit PowerShell expressions and avoid invented commands.
   - The runner will replan if the command starts with an unknown `Verb-Noun` cmdlet.
+
+- **RUN_COMMAND path rejected**
+  - A command referenced a path outside `C:\agent\` or included trailing punctuation in a path.
+  - Fix: keep absolute paths under `C:\agent\` and quote paths when followed by `;` or `,`.
 
 - **RUN_COMMAND missing**
   - The plan used `RUN_COMMAND` without a command string.

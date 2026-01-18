@@ -22,6 +22,8 @@ The planner receives a strict JSON template and a fixed action schema. The promp
 - Actions must be single-line strings with no raw newlines.
 - `{item}` is treated as a full absolute path (not a basename).
 - `REPEAT` index is zero-based; use `{index:03d}` for padding.
+- `WRITE_FILE` content must be embedded in the action string; `expects` is not used for file contents.
+- Use `WRITE_FILE|<path>|EMPTY_FILE` to create empty files.
 
 ## 4) Validation and Repair
 The agent validates:
@@ -29,6 +31,7 @@ The agent validates:
 - Allowed actions only
 - Path safety (must remain under `C:\agent\`)
 - `WRITE_FILE` content must be real text (not placeholders)
+- `WRITE_FILE` with `EMPTY_FILE` is allowed for blank files
 - `FOR_EACH` list keys must already exist
 - `FOR_EACH` may not use `CREATE_DIR` (creation must be explicit)
 - `RUN_COMMAND` must be PowerShell-native and cannot rely on invented cmdlets

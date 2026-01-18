@@ -12,7 +12,8 @@
 - Ensure FOR_EACH list keys are created before use (FIND_FILES/LIST_DIR must appear before use). (done)
 - Normalize LIST_DIR with globs into FIND_FILES (e.g., LIST_DIR|C:\agent\*.ps1). (done)
 - Reject unknown actions (CREATE_FILE, READ_FIRST_LINES, WRITE_REPORT). (pending: add explicit unknown-action list to prompt)
-- Ensure WRITE_FILE specs include real content (length + not placeholder).
+- Ensure WRITE_FILE specs include real content (length + not placeholder). (done: EMPTY_FILE allowed)
+- Clarify WRITE_FILE content belongs in action string, not expects. (done)
 - Decide and document FOR_EACH semantics (does {item} resolve to full path or basename). (done)
 - Decide and document REPEAT index format rules (zero-based vs one-based, padding). (done)
 - Consider rejecting FOR_EACH that targets non-existent items (creation-only). (done)
@@ -38,6 +39,8 @@
 - Add pre-step check summaries between actions. (done)
 - Add trace-level logging for function entry and key parameters. (done)
 - Replan when RUN_COMMAND fails (missing cmdlet / runtime error). (done)
+- Trim trailing punctuation when validating absolute paths inside RUN_COMMAND. (done)
+- Document EMPTY_FILE and WRITE_FILE content rules. (done)
 
 ## Example Plan (for reference)
 - CREATE_DIR|C:\agent\new000
