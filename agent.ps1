@@ -64,6 +64,8 @@ $OllamaGenApi  = "http://localhost:11434/api/generate"
 $DebugLogPath = "C:\agent\agent-debug.log"
 $DebugLogMaxChars = 2000
 $DebugLogFull = $true
+$DebugLogPretty = $true
+$RequireJsonTags = $true
 $RootDir = "C:\agent\"
 
 # ------------------ GOAL ------------------
@@ -85,10 +87,24 @@ function Log-Debug-Raw {
         Log-Debug ("{0}: <empty>" -f $Label)
         return
     }
-    $clean = $Text -replace "(\r\n|\r|\n)", "\n"
-    if (-not $DebugLogFull -and $clean.Length -gt $DebugLogMaxChars) {
-        $clean = $clean.Substring(0, $DebugLogMaxChars) + "...[truncated]"
+    $clean = $Text
+    if (-not $DebugLogFull) {
+        $flat = $clean -replace "(\r\n|\r|\n)", "\n"
+        if ($flat.Length -gt $DebugLogMaxChars) {
+            $clean = $flat.Substring(0, $DebugLogMaxChars) + "...[truncated]"
+        }
     }
+    if ($DebugLogPretty) {
+        $ts = (Get-Date).ToString("s")
+        Add-Content -Path $DebugLogPath -Value ("[{0}] {1}:" -f $ts, $Label)
+        $lines = ($clean -split "(\r\n|\r|\n)") | Where-Object { $_ -ne "" }
+        foreach ($line in $lines) {
+            Add-Content -Path $DebugLogPath -Value ("  {0}" -f $line)
+        }
+        Add-Content -Path $DebugLogPath -Value ""
+        return
+    }
+    $clean = $clean -replace "(\r\n|\r|\n)", "\n"
     Log-Debug ("{0}: {1}" -f $Label, $clean)
 }
 
@@ -203,6 +219,7 @@ function Extract-Json {
             return $inner
         }
     }
+    if ($RequireJsonTags) { return $null }
     $start = $Text.IndexOf("{")
     if ($start -lt 0) { return $null }
     $depth = 0
@@ -234,7 +251,7 @@ Rules:
 - Do not add any extra keys beyond the schema.
 - Ensure all strings are double-quoted.
 - Do not include stray numbers or trailing commas.
- - Wrap the JSON in <json>...</json> tags.
+- Wrap the JSON in <json>...</json> tags.
 
 SCHEMA:
 {
@@ -262,7 +279,7 @@ $Text
     Invoke-Ollama `
         -Model $repairModel `
         -Prompt $repairPrompt `
-        -System "Return JSON only." `
+        -System "Return ONLY <json>...</json>. Any other text is invalid." `
         -Options @{
             num_ctx     = $PlannerNumCtx
             num_predict = $PlannerPredict
@@ -282,6 +299,19 @@ function Normalize-PathString {
         $p = $p -replace '^\\\\\\\\+', '\\\\'
     }
     $p
+}
+
+# ------------------ JSON FENCE STRIP ------------------
+function Strip-JsonFences {
+    param([string]$Text)
+    if (-not $Text) { return $Text }
+    $t = $Text.Trim()
+    if ($t -match '^```') {
+        $t = [regex]::Replace($t, '^```[a-zA-Z]*\s*', '', 'Singleline')
+        $t = [regex]::Replace($t, '```$', '', 'Singleline')
+        return $t.Trim()
+    }
+    $Text
 }
 
 # ------------------ PLAN PROMPT ------------------
@@ -377,6 +407,7 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
 
     Write-Host "`n[AGENT] Planning iteration $i..."
     Log-Debug "Planning iteration $i"
+    Log-Debug "-----"
 
     if ($PlannerRejectStreak -ge $EscalateAfterRejects -and $PlannerFallbackIndex -lt ($PlannerFallbacks.Count - 1)) {
         $PlannerFallbackIndex++
@@ -392,7 +423,7 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
     $raw = Invoke-Ollama `
         -Model $PlannerModel `
         -Prompt $planPrompt `
-        -System "Return JSON only." `
+        -System "Return ONLY <json>...</json>. Any other text is invalid." `
         -Options @{
             num_ctx     = $PlannerNumCtx
             num_predict = $PlannerPredict
@@ -400,7 +431,11 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
         }
     Log-Debug-Raw -Label "Planner raw" -Text $raw
 
-    $json = Extract-Json $raw
+    $rawClean = Strip-JsonFences -Text $raw
+    if ($rawClean -ne $raw) {
+        Log-Debug "Stripped JSON fences"
+    }
+    $json = Extract-Json $rawClean
     if (-not $json) {
         Write-Host "[AGENT] Reject: no JSON detected"
         Log-Debug "Reject: no JSON detected"
@@ -416,7 +451,7 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
         Log-Debug "Reject: invalid JSON"
         Add-Failure "Invalid JSON"
         $PlannerRejectStreak++
-        $repaired = Repair-Json -Text $raw
+        $repaired = Repair-Json -Text $rawClean
         Log-Debug-Raw -Label "Planner repaired" -Text $repaired
         if ($repaired) {
             $repairedJson = Extract-Json $repaired

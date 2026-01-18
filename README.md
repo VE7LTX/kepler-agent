@@ -9,7 +9,7 @@ A local PowerShell automation agent that plans tasks, validates actions, and exe
 - Logs planning attempts, rejections, and model output to `C:\agent\agent-debug.log`.
 - Repairs invalid JSON output and retries planning when possible.
 - Escalates to stronger planner models after repeated failures.
-- Uses a strict JSON template and `<json>...</json>` tags to stabilize planner output.
+- Uses a strict JSON template wrapped in `<json>...</json>` tags.
 
 ## Action Model
 All actions are single-line strings in the plan. Multi-file tasks use `FOR_EACH` or `BUILD_REPORT`.
@@ -74,6 +74,8 @@ All actions are single-line strings in the plan. Multi-file tasks use `FOR_EACH`
 ## Debugging
 - Logs to `C:\agent\agent-debug.log`.
 - Includes full prompts/responses when `$DebugLogFull = $true`.
+- Pretty multi-line log blocks when `$DebugLogPretty = $true`.
+- JSON tag enforcement controlled by `$RequireJsonTags`.
 
 ## Usage
 ```powershell
