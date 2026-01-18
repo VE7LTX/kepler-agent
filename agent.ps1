@@ -619,6 +619,7 @@ Rules:
 - REPEAT index is zero-based. Use {index} or {index:03d} for padding.
 - Avoid destructive commands.
 - Use PowerShell-native commands only; avoid sh, bash, seq, xargs, grep, awk, sed, cut, head, tail.
+- Do NOT invent cmdlets. If you need computation, write explicit PowerShell expressions inside RUN_COMMAND.
 - Use absolute Windows paths or workspace-relative paths under C:\agent only.   
 - Do not use placeholders like "<path>" or "/path/to/...".
 - Do not use Unix-style paths (e.g., /home/user).
@@ -1882,7 +1883,15 @@ function Run-Command {
     }
 
     Write-Host "[RUNNER] $Command"
-    Invoke-Expression $Command
+    try {
+        Invoke-Expression $Command
+    } catch {
+        $msg = $_.Exception.Message
+        Write-Host "[RUNNER] Command failed: $msg"
+        Log-Debug ("RUN_COMMAND failed: {0}" -f $msg)
+        $script:UserFeedback = "RUN_COMMAND failed: $msg"
+        $script:ReplanRequested = $true
+    }
 }
 
 # ------------------ CONFIRM ACTION ------------------

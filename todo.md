@@ -37,6 +37,7 @@
 - Add fast failure reflection before retries and surface output to user. (done)
 - Add pre-step check summaries between actions. (done)
 - Add trace-level logging for function entry and key parameters. (done)
+- Replan when RUN_COMMAND fails (missing cmdlet / runtime error). (done)
 
 ## Example Plan (for reference)
 - CREATE_DIR|C:\agent\new000

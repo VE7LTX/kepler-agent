@@ -30,6 +30,7 @@ The agent validates:
 - `WRITE_FILE` content must be real text (not placeholders)
 - `FOR_EACH` list keys must already exist
 - `FOR_EACH` may not use `CREATE_DIR` (creation must be explicit)
+- `RUN_COMMAND` must be PowerShell-native and cannot rely on invented cmdlets
 
 If JSON is invalid, the agent attempts a repair pass and retries.
 

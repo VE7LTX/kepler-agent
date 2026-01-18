@@ -31,6 +31,10 @@ This section lists common failures, why they happen, and what to check.
   - The plan used Unix shell tools (e.g., `sh`, `seq`, `xargs`).
   - Fix: use PowerShell-native commands instead.
 
+- **RUN_COMMAND failed**
+  - The command crashed or referenced a missing cmdlet.
+  - Fix: use explicit PowerShell expressions and avoid invented commands.
+
 - **Long delays**
   - Larger models can take 30-90 seconds per planning call.
   - Fix: use smaller models or reduce `PlannerPredict` in `agent.ps1`.
