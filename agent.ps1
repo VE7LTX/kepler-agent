@@ -43,13 +43,15 @@ $MaxPlanIterations = 0
 $MaxPlanMinutes    = 0
 $RequireConfidence = 0.75
 $PlannerFallbacks = @(
-    @{ name = "phi3-4k"; temp = 0.2 },
-    @{ name = "phi3:latest"; temp = 0.2 },
-    @{ name = "codellama:7b-instruct-8k"; temp = 0.2 }
+    @{ name = "phi3-4k"; temp = 0.0 },
+    @{ name = "qwen2:7b-instruct"; temp = 0.0 },
+    @{ name = "mistral:7b-instruct"; temp = 0.0 },
+    @{ name = "deepseek-coder:6.7b-instruct"; temp = 0.0 },
+    @{ name = "codellama:13b-instruct"; temp = 0.0 }
 )
 $PlannerFallbackIndex = 0
 $PlannerRejectStreak = 0
-$EscalateAfterRejects = 3
+$EscalateAfterRejects = 2
 
 $EffectiveMaxIterations = $MaxPlanIterations
 if ($EffectiveMaxIterations -le 0) { $EffectiveMaxIterations = [int]::MaxValue }

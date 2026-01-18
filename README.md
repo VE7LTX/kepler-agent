@@ -68,7 +68,7 @@ All actions are single-line strings in the plan. Multi-file tasks use `FOR_EACH`
 ## Planning Behavior
 - Goal restatement is generated before approval.
 - Recent failures are carried into the next planning attempt to avoid repeated mistakes.
-- Planner escalation after 3 rejects: `phi3-4k` → `phi3:latest` → `codellama:7b-instruct-8k`.
+- Planner escalation after 2 rejects: `phi3-4k` → `qwen2:7b-instruct` → `mistral:7b-instruct` → `deepseek-coder:6.7b-instruct` → `codellama:13b-instruct`.
 - Planner uses a strict JSON template with `<json>...</json>` tags.
 
 ## Debugging
