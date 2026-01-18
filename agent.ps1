@@ -80,6 +80,7 @@ function Log-Debug-Raw {
     Log-Debug ("{0}: {1}" -f $Label, $clean)
 }
 
+
 # ------------------ GOAL SANITIZER ------------------
 function Sanitize-Goal {
     param([string]$Text)
@@ -210,7 +211,7 @@ Schema:
   "plan": [
     {
       "step": 1,
-      "action": "READ_FILE|<path> or WRITE_FILE|<path>|<spec> or RUN_COMMAND|<command>",
+      "action": "READ_FILE|<path> or READ_PART|<path>|<start>|<count> or WRITE_FILE|<path>|<spec> or APPEND_FILE|<path>|<text> or WRITE_PATCH|<path>|<diff> or RUN_COMMAND|<command> or LIST_DIR|<path> or FIND_FILES|<glob> or SEARCH_TEXT|<pattern>|<path>",
       "expects": "string"
     }
   ]
@@ -219,7 +220,7 @@ Schema:
 Rules:
 - Provide a brief thinking_summary (2-4 short bullets). Do NOT include chain-of-thought.
 - Plan should be minimal and ordered.
-- Prefer READ_FILE before WRITE_FILE when editing an existing file.
+- Prefer LIST_DIR or FIND_FILES to discover files, then READ_FILE/READ_PART before WRITE_FILE when editing an existing file.
 - Avoid destructive commands.
 - Use absolute Windows paths or workspace-relative paths under C:\agent only.
 - Do not use placeholders like "<path>" or "/path/to/...".
@@ -229,7 +230,7 @@ Rules:
 - Output must be valid JSON with no stray text, extra numbers, or trailing commas.
 - Do not include raw newlines inside action strings; use \\n escapes only.
 - Respect any directory constraints explicitly stated in the goal.
-- Allowed actions only: READ_FILE, WRITE_FILE, RUN_COMMAND. Do not invent new action types.
+- Allowed actions only: READ_FILE, READ_PART, WRITE_FILE, APPEND_FILE, WRITE_PATCH, RUN_COMMAND, LIST_DIR, FIND_FILES, SEARCH_TEXT. Do not invent new action types.
 
 GOAL:
 $Goal
@@ -293,6 +294,29 @@ for ($i = 1; $i -le $MaxPlanIterations; $i++) {
     }
     $normalizedActions = $false
     foreach ($p in $candidate.plan) {
+        if ($p.PSObject.Properties.Name -contains 'action') {
+            if ($p.action -match '^WRITE_FILE\|' -and $p.PSObject.Properties.Name -contains 'spec') {
+                $parts = $p.action.Split('|',3)
+                if ($parts.Length -eq 2 -and $p.spec) {
+                    $p.action = $p.action + "|" + $p.spec
+                    $normalizedActions = $true
+                }
+            }
+            if ($p.action -match '^WRITE_PATCH\|' -and $p.PSObject.Properties.Name -contains 'patch') {
+                $parts = $p.action.Split('|',3)
+                if ($parts.Length -eq 2 -and $p.patch) {
+                    $p.action = $p.action + "|" + $p.patch
+                    $normalizedActions = $true
+                }
+            }
+            if ($p.action -match '^APPEND_FILE\|' -and $p.PSObject.Properties.Name -contains 'text') {
+                $parts = $p.action.Split('|',3)
+                if ($parts.Length -eq 2 -and $p.text) {
+                    $p.action = $p.action + "|" + $p.text
+                    $normalizedActions = $true
+                }
+            }
+        }
         if ($p.action -match "[\r\n]") {
             $p.action = ($p.action -replace "(\r\n|\r|\n)", "\\n")
             $normalizedActions = $true
@@ -316,7 +340,7 @@ for ($i = 1; $i -le $MaxPlanIterations; $i++) {
 
     $allActionsValid = $true
     foreach ($p in $candidate.plan) {
-        if ($p.action -notmatch '^(READ_FILE|WRITE_FILE|RUN_COMMAND)\|') {
+        if ($p.action -notmatch '^(READ_FILE|READ_PART|WRITE_FILE|APPEND_FILE|WRITE_PATCH|RUN_COMMAND|LIST_DIR|FIND_FILES|SEARCH_TEXT)\|') {
             $allActionsValid = $false
             break
         }
@@ -334,8 +358,12 @@ for ($i = 1; $i -le $MaxPlanIterations; $i++) {
     }
     $pathsValid = $true
     foreach ($p in $candidate.plan) {
-        if ($p.action -match '^(READ_FILE|WRITE_FILE)\|') {
-            $path = $p.action.Split('|',3)[1]
+        if ($p.action -match '^(READ_FILE|WRITE_FILE|LIST_DIR|READ_PART|APPEND_FILE|WRITE_PATCH|SEARCH_TEXT)\|') {
+            $pathIndex = 1
+            if ($p.action -match '^SEARCH_TEXT\|') {
+                $pathIndex = 2
+            }
+            $path = $p.action.Split('|',4)[$pathIndex]
             if ($path -match '<path>|/path/to' -or $path -match '^(?i)/home/|^/|\\?/') {
                 $pathsValid = $false
                 break
@@ -501,6 +529,163 @@ function Read-File {
     Write-Host "[READER] Loaded $Path"
 }
 
+# ------------------ LIST DIR ------------------
+function List-Dir {
+    param([string]$Path)
+
+    $Path = Normalize-PathString -Path $Path
+    if ($Path -match '<path>|/path/to') {
+        Write-Host "[LISTER] Invalid placeholder path: $Path"
+        return
+    }
+    if ($Path -match '^(?i)/home/|^/|\\?/') {
+        Write-Host "[LISTER] Invalid Unix-style path: $Path"
+        return
+    }
+    if (-not (Test-Path $Path)) {
+        Write-Host "[LISTER] Missing: $Path"
+        return
+    }
+
+    $items = Get-ChildItem -Path $Path -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 200 -ExpandProperty FullName
+    $list = $items -join "`n"
+    $script:Context["DIR:$Path"] = $list
+    Write-Host "[LISTER] Listed $Path (max 200 files)"
+}
+
+# ------------------ FIND FILES ------------------
+function Find-Files {
+    param([string]$Glob)
+
+    if (-not $Glob) {
+        Write-Host "[FINDER] Missing glob"
+        return
+    }
+
+    $items = Get-ChildItem -Path $RootDir -Recurse -File -Filter $Glob -ErrorAction SilentlyContinue | Select-Object -First 200 -ExpandProperty FullName
+    $list = $items -join "`n"
+    $script:Context["FIND:$Glob"] = $list
+    Write-Host "[FINDER] Found files for '$Glob' (max 200)"
+}
+
+# ------------------ SEARCH TEXT ------------------
+function Search-Text {
+    param(
+        [string]$Pattern,
+        [string]$Path
+    )
+
+    $Path = Normalize-PathString -Path $Path
+    if ($Path -match '<path>|/path/to') {
+        Write-Host "[SEARCH] Invalid placeholder path: $Path"
+        return
+    }
+    if ($Path -match '^(?i)/home/|^/|\\?/') {
+        Write-Host "[SEARCH] Invalid Unix-style path: $Path"
+        return
+    }
+    if (-not (Test-Path $Path)) {
+        Write-Host "[SEARCH] Missing: $Path"
+        return
+    }
+
+    $results = Select-String -Path $Path -Pattern $Pattern -AllMatches -ErrorAction SilentlyContinue | Select-Object -First 200 | ForEach-Object {
+        "{0}:{1}:{2}" -f $_.Path, $_.LineNumber, $_.Line.Trim()
+    }
+    $list = $results -join "`n"
+    $script:Context["SEARCH:$Pattern|$Path"] = $list
+    Write-Host "[SEARCH] Searched $Path (max 200 matches)"
+}
+
+# ------------------ READ PART ------------------
+function Read-Part {
+    param(
+        [string]$Path,
+        [int]$Start,
+        [int]$Count
+    )
+
+    $Path = Normalize-PathString -Path $Path
+    if ($Path -match '<path>|/path/to') {
+        Write-Host "[READER] Invalid placeholder path: $Path"
+        return
+    }
+    if ($Path -match '^(?i)/home/|^/|\\?/') {
+        Write-Host "[READER] Invalid Unix-style path: $Path"
+        return
+    }
+    if (-not (Test-Path $Path)) {
+        Write-Host "[READER] Missing: $Path"
+        return
+    }
+
+    if ($Start -lt 1) { $Start = 1 }
+    if ($Count -lt 1) { $Count = 50 }
+    $skip = $Start - 1
+    $lines = Get-Content -Path $Path | Select-Object -Skip $skip -First $Count
+    $text = $lines -join "`n"
+    $script:Context["PART:$Path:$Start:$Count"] = $text
+    Write-Host "[READER] Read part of $Path (lines $Start-$($Start + $Count - 1))"
+}
+
+# ------------------ APPEND FILE ------------------
+function Append-File {
+    param(
+        [string]$Path,
+        [string]$Text
+    )
+
+    $Path = Normalize-PathString -Path $Path
+    if ($Path -match '<path>|/path/to') {
+        Write-Host "[APPEND] Invalid placeholder path: $Path"
+        return
+    }
+    if ($Path -match '^(?i)/home/|^/|\\?/') {
+        Write-Host "[APPEND] Invalid Unix-style path: $Path"
+        return
+    }
+
+    $Text = $Text -replace "\\n", "`n"
+    Add-Content -Path $Path -Value $Text -Encoding utf8
+    Write-Host "[APPEND] Appended to $Path"
+}
+
+# ------------------ WRITE PATCH ------------------
+function Write-Patch {
+    param(
+        [string]$Path,
+        [string]$Diff
+    )
+
+    $Path = Normalize-PathString -Path $Path
+    if ($Path -match '<path>|/path/to') {
+        Write-Host "[PATCH] Invalid placeholder path: $Path"
+        return
+    }
+    if ($Path -match '^(?i)/home/|^/|\\?/') {
+        Write-Host "[PATCH] Invalid Unix-style path: $Path"
+        return
+    }
+    if (-not (Test-Path $Path)) {
+        Write-Host "[PATCH] Missing: $Path"
+        return
+    }
+
+    $Diff = $Diff -replace "\\n", "`n"
+    $tmp = Join-Path $RootDir "_tmp_patch.diff"
+    Set-Content -Path $tmp -Value $Diff -Encoding utf8
+
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        git apply -- "$tmp" | Out-Null
+        Write-Host "[PATCH] Applied via git"
+    } elseif (Get-Command patch -ErrorAction SilentlyContinue) {
+        patch -p0 --input "$tmp" | Out-Null
+        Write-Host "[PATCH] Applied via patch"
+    } else {
+        Write-Host "[PATCH] No patch tool available"
+    }
+}
+
 # ------------------ RUN COMMAND ------------------
 function Run-Command {
     param([string]$Command)
@@ -545,9 +730,41 @@ foreach ($s in $plan.plan) {
         continue
     }
 
+    if ($s.action -match '^READ_PART\|(.+?)\|(\d+)\|(\d+)$') {
+        Read-Part -Path $matches[1] -Start ([int]$matches[2]) -Count ([int]$matches[3])
+        continue
+    }
+
+    if ($s.action -match '^LIST_DIR\|(.+)$') {
+        List-Dir -Path $matches[1]
+        continue
+    }
+
+    if ($s.action -match '^FIND_FILES\|(.+)$') {
+        Find-Files -Glob $matches[1]
+        continue
+    }
+
+    if ($s.action -match '^SEARCH_TEXT\|(.+?)\|(.+)$') {
+        Search-Text -Pattern $matches[1] -Path $matches[2]
+        continue
+    }
+
     if ($s.action -match '(?s)^WRITE_FILE\|(.+?)\|(.+)$') {
         if (-not (Confirm-Action -Kind "WRITE_FILE" -Detail $matches[1])) { exit }
         Write-File -Path $matches[1] -Spec $matches[2]
+        continue
+    }
+
+    if ($s.action -match '(?s)^APPEND_FILE\|(.+?)\|(.+)$') {
+        if (-not (Confirm-Action -Kind "APPEND_FILE" -Detail $matches[1])) { exit }
+        Append-File -Path $matches[1] -Text $matches[2]
+        continue
+    }
+
+    if ($s.action -match '(?s)^WRITE_PATCH\|(.+?)\|(.+)$') {
+        if (-not (Confirm-Action -Kind "WRITE_PATCH" -Detail $matches[1])) { exit }
+        Write-Patch -Path $matches[1] -Diff $matches[2]
         continue
     }
 
