@@ -36,6 +36,10 @@ This section lists common failures, why they happen, and what to check.
   - Fix: use explicit PowerShell expressions and avoid invented commands.
   - The runner will replan if the command starts with an unknown `Verb-Noun` cmdlet.
 
+- **RUN_COMMAND missing**
+  - The plan used `RUN_COMMAND` without a command string.
+  - Fix: use `RUN_COMMAND|<command>` with an explicit PowerShell command.
+
 - **Long delays**
   - Larger models can take 30-90 seconds per planning call.
   - Fix: use smaller models or reduce `PlannerPredict` in `agent.ps1`.

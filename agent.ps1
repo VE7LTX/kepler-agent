@@ -585,7 +585,8 @@ function Build-PlanPrompt {
         "Do NOT use parent traversal (e.g., {item}\\.. or ..) in any path.",
         "Actions must be single-line; if content needs newlines, use \\n escapes in the spec.",
         "Each plan item must have only: step, action, expects.",
-        "Allowed actions only: READ_FILE, READ_PART, WRITE_FILE, APPEND_FILE, WRITE_PATCH, RUN_COMMAND, LIST_DIR, FIND_FILES, SEARCH_TEXT, FOR_EACH, REPEAT, BUILD_REPORT, CREATE_DIR, DELETE_FILE, DELETE_DIR, MOVE_ITEM, COPY_ITEM, RENAME_ITEM, VERIFY_PATH."
+        "Allowed actions only: READ_FILE, READ_PART, WRITE_FILE, APPEND_FILE, WRITE_PATCH, RUN_COMMAND, LIST_DIR, FIND_FILES, SEARCH_TEXT, FOR_EACH, REPEAT, BUILD_REPORT, CREATE_DIR, DELETE_FILE, DELETE_DIR, MOVE_ITEM, COPY_ITEM, RENAME_ITEM, VERIFY_PATH.",
+        "RUN_COMMAND must include a command after the pipe (RUN_COMMAND|<command>)."
     )
 
     $actionRules = @()
@@ -900,6 +901,11 @@ while ($true) {
         if ($p.action -notmatch '^FOR_EACH\|' -and $p.action -match '\{item\}') {
             $allActionsValid = $false
             $actionRejectDetail = "PLACEHOLDER_MISUSE: {item} used outside FOR_EACH."
+            break
+        }
+        if ($p.action -match '^RUN_COMMAND$') {
+            $allActionsValid = $false
+            $actionRejectDetail = "RUN_COMMAND_MISSING: action must be RUN_COMMAND|<command>."
             break
         }
         if ($p.action -notmatch '^(READ_FILE|READ_PART|WRITE_FILE|APPEND_FILE|WRITE_PATCH|RUN_COMMAND|LIST_DIR|FIND_FILES|SEARCH_TEXT|FOR_EACH|REPEAT|BUILD_REPORT|CREATE_DIR|DELETE_FILE|DELETE_DIR|MOVE_ITEM|COPY_ITEM|RENAME_ITEM|VERIFY_PATH)\|') {
