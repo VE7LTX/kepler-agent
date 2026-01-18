@@ -33,7 +33,7 @@ $WriterModel  = "codellama:7b-instruct"
 
 $PlannerNumCtx   = 4096
 $PlannerPredict  = 900
-$PlannerTemp     = 0.2
+$PlannerTemp     = 0.0
 
 $WriterNumCtx    = 4096
 $WriterPredict   = 2400
@@ -63,6 +63,7 @@ $OllamaGenApi  = "http://localhost:11434/api/generate"
 
 $DebugLogPath = "C:\agent\agent-debug.log"
 $DebugLogMaxChars = 2000
+$DebugLogFull = $true
 $RootDir = "C:\agent\"
 
 # ------------------ GOAL ------------------
@@ -85,7 +86,7 @@ function Log-Debug-Raw {
         return
     }
     $clean = $Text -replace "(\r\n|\r|\n)", "\n"
-    if ($clean.Length -gt $DebugLogMaxChars) {
+    if (-not $DebugLogFull -and $clean.Length -gt $DebugLogMaxChars) {
         $clean = $clean.Substring(0, $DebugLogMaxChars) + "...[truncated]"
     }
     Log-Debug ("{0}: {1}" -f $Label, $clean)
@@ -104,15 +105,18 @@ $Text
 }
 
 function Get-GoalSummary {
+    $promptText = Build-GoalRestatement -Text $Goal
+    Log-Debug-Raw -Label "Goal restatement prompt" -Text $promptText
     $summary = Invoke-Ollama `
         -Model $PlannerModel `
-        -Prompt (Build-GoalRestatement -Text $Goal) `
+        -Prompt $promptText `
         -System "Return plain text only." `
         -Options @{
             num_ctx     = $PlannerNumCtx
             num_predict = 200
             temperature = 0.1
         }
+    Log-Debug-Raw -Label "Goal restatement response" -Text $summary
     $summary
 }
 
@@ -190,6 +194,15 @@ function Invoke-Ollama {
 # ------------------ JSON EXTRACT ------------------
 function Extract-Json {
     param([string]$Text)
+    if (-not $Text) { return $null }
+    $tagMatch = [regex]::Match($Text, "<json>(.*?)</json>", [System.Text.RegularExpressions.RegexOptions]::Singleline)
+    if ($tagMatch.Success) {
+        $inner = $tagMatch.Groups[1].Value
+        $inner = $inner.Trim()
+        if ($inner.StartsWith("{") -and $inner.EndsWith("}")) {
+            return $inner
+        }
+    }
     $start = $Text.IndexOf("{")
     if ($start -lt 0) { return $null }
     $depth = 0
@@ -209,6 +222,11 @@ function Extract-Json {
 function Repair-Json {
     param([string]$Text)
     if (-not $Text) { return $null }
+    $fallbackIndex = $PlannerFallbackIndex
+    if ($fallbackIndex -lt ($PlannerFallbacks.Count - 1)) {
+        $fallbackIndex++
+    }
+    $repairModel = $PlannerFallbacks[$fallbackIndex].name
     $repairPrompt = @"
 Fix the following output into valid JSON that matches the required schema.
 Rules:
@@ -216,6 +234,7 @@ Rules:
 - Do not add any extra keys beyond the schema.
 - Ensure all strings are double-quoted.
 - Do not include stray numbers or trailing commas.
+ - Wrap the JSON in <json>...</json> tags.
 
 SCHEMA:
 {
@@ -239,8 +258,9 @@ SCHEMA:
 INPUT:
 $Text
 "@
+    Log-Debug-Raw -Label "Repair prompt" -Text $repairPrompt
     Invoke-Ollama `
-        -Model $PlannerModel `
+        -Model $repairModel `
         -Prompt $repairPrompt `
         -System "Return JSON only." `
         -Options @{
@@ -271,7 +291,30 @@ function Build-PlanPrompt {
         $failureNotes = "Recent failures to avoid:`n- " + ($FailureMemory -join "`n- ")
     }
 @"
-Return JSON ONLY.
+Return JSON ONLY inside <json>...</json> tags. Do not output anything outside the tags.
+Use the exact template and fill in values. Do not add keys.
+
+TEMPLATE:
+<json>
+{
+  "goal": "",
+  "thinking_summary": ["", ""],
+  "reflection": {
+    "issues_found": [""],
+    "changes_made": [""],
+    "confidence": 0.0
+  },
+  "ready": true,
+  "plan": [
+    {
+      "step": 1,
+      "action": "",
+      "expects": ""
+    }
+  ]
+}
+</json>
+
 Schema:
 {
   "goal": "string",
@@ -344,9 +387,11 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
         Log-Debug "Escalated planner model to $PlannerModel"
     }
 
+    $planPrompt = Build-PlanPrompt
+    Log-Debug-Raw -Label "Planner prompt" -Text $planPrompt
     $raw = Invoke-Ollama `
         -Model $PlannerModel `
-        -Prompt (Build-PlanPrompt) `
+        -Prompt $planPrompt `
         -System "Return JSON only." `
         -Options @{
             num_ctx     = $PlannerNumCtx

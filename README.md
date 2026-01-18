@@ -9,6 +9,7 @@ A local PowerShell automation agent that plans tasks, validates actions, and exe
 - Logs planning attempts, rejections, and model output to `C:\agent\agent-debug.log`.
 - Repairs invalid JSON output and retries planning when possible.
 - Escalates to stronger planner models after repeated failures.
+- Uses a strict JSON template and `<json>...</json>` tags to stabilize planner output.
 
 ## Action Model
 All actions are single-line strings in the plan. Multi-file tasks use `FOR_EACH` or `BUILD_REPORT`.
@@ -68,10 +69,11 @@ All actions are single-line strings in the plan. Multi-file tasks use `FOR_EACH`
 - Goal restatement is generated before approval.
 - Recent failures are carried into the next planning attempt to avoid repeated mistakes.
 - Planner escalation after 3 rejects: `phi3-4k` → `phi3:latest` → `codellama:7b-instruct-8k`.
+- Planner uses a strict JSON template with `<json>...</json>` tags.
 
 ## Debugging
 - Logs to `C:\agent\agent-debug.log`.
-- Includes raw planner output (truncated) and rejection reasons.
+- Includes full prompts/responses when `$DebugLogFull = $true`.
 
 ## Usage
 ```powershell
@@ -82,7 +84,7 @@ All actions are single-line strings in the plan. Multi-file tasks use `FOR_EACH`
 Key settings live near the top of `agent.ps1`:
 - Models and Ollama endpoints
 - Confirmation toggles
-- Debug log path
+- Debug log path and verbosity
 - Root directory constraint
 
 ## Notes
