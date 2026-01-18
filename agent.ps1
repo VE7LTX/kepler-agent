@@ -168,6 +168,7 @@ if ($Goal -ne $OriginalGoal) {
 $RequireRootPath = $RootDir
 Log-Debug "RequireRootPath: $RequireRootPath"
 $FailureMemory = New-Object System.Collections.Generic.List[string]
+$GoalRestatement = Get-GoalSummary
 
 # ------------------ OLLAMA WAIT ------------------
 function Wait-ForOllama {
@@ -414,7 +415,7 @@ Schema:
   "plan": [
     {
       "step": 1,
-      "action": "READ_FILE|<path> or READ_PART|<path>|<start>|<count> or WRITE_FILE|<path>|<spec> or APPEND_FILE|<path>|<text> or WRITE_PATCH|<path>|<diff> or RUN_COMMAND|<command> or LIST_DIR|<path> or FIND_FILES|<glob> or SEARCH_TEXT|<pattern>|<path> or FOR_EACH|<list_key>|<action_template> or BUILD_REPORT|<glob>|<start>|<count>|<outpath>|<patterns> or CREATE_DIR|<path> or DELETE_FILE|<path> or DELETE_DIR|<path> or MOVE_ITEM|<src>|<dest> or COPY_ITEM|<src>|<dest> or RENAME_ITEM|<src>|<dest> or VERIFY_PATH|<path>",
+      "action": "READ_FILE|<path> or READ_PART|<path>|<start>|<count> or WRITE_FILE|<path>|<spec> or APPEND_FILE|<path>|<text> or WRITE_PATCH|<path>|<diff> or RUN_COMMAND|<command> or LIST_DIR|<path> or FIND_FILES|<glob> or SEARCH_TEXT|<pattern>|<path> or FOR_EACH|<list_key>|<action_template> or REPEAT|<count>|<action_template> or BUILD_REPORT|<glob>|<start>|<count>|<outpath>|<patterns> or CREATE_DIR|<path> or DELETE_FILE|<path> or DELETE_DIR|<path> or MOVE_ITEM|<src>|<dest> or COPY_ITEM|<src>|<dest> or RENAME_ITEM|<src>|<dest> or VERIFY_PATH|<path>",
       "expects": "string"
     }
   ]
@@ -425,6 +426,7 @@ Rules:
 - Plan should be minimal and ordered.
 - Prefer LIST_DIR or FIND_FILES to discover files, then READ_FILE/READ_PART before WRITE_FILE when editing an existing file.
 - For multi-file tasks, use FOR_EACH with a list key from LIST_DIR or FIND_FILES.
+- For fixed-count tasks (e.g., create N items), use REPEAT.
 - Avoid destructive commands.
 - Use absolute Windows paths or workspace-relative paths under C:\agent only.
 - Do not use placeholders like "<path>" or "/path/to/...".
@@ -436,14 +438,16 @@ Rules:
 - Escape quotes inside action strings with \\\".
 - Each plan item must have only: step, action, expects.
 - Respect any directory constraints explicitly stated in the goal.
-- Allowed actions only: READ_FILE, READ_PART, WRITE_FILE, APPEND_FILE, WRITE_PATCH, RUN_COMMAND, LIST_DIR, FIND_FILES, SEARCH_TEXT, FOR_EACH, BUILD_REPORT, CREATE_DIR, DELETE_FILE, DELETE_DIR, MOVE_ITEM, COPY_ITEM, RENAME_ITEM, VERIFY_PATH. Do not invent new action types.
+- Allowed actions only: READ_FILE, READ_PART, WRITE_FILE, APPEND_FILE, WRITE_PATCH, RUN_COMMAND, LIST_DIR, FIND_FILES, SEARCH_TEXT, FOR_EACH, REPEAT, BUILD_REPORT, CREATE_DIR, DELETE_FILE, DELETE_DIR, MOVE_ITEM, COPY_ITEM, RENAME_ITEM, VERIFY_PATH. Do not invent new action types.
 - Do not invent control flow (GOTO/IF/LOOP). Use FOR_EACH only.
 - Only use {item} and {index} placeholders inside FOR_EACH action templates.
 - FOR_EACH format must be exactly: FOR_EACH|<list_key>|<action_template>.
 - list_key must be "FIND:<glob>" or "DIR:<path>".
 - FIND_FILES takes only a glob (no paths).
+- REPEAT format must be exactly: REPEAT|<count>|<action_template>.
 - BUILD_REPORT example: BUILD_REPORT|*.ps1|1|40|C:\\agent\\ps1-report.txt|RUN_COMMAND,Write-File
 - FOR_EACH example: FOR_EACH|FIND:*.ps1|READ_PART|{item}|1|40
+- REPEAT example: REPEAT|3|CREATE_DIR|C:\\agent\\new{index:03d}
 $failureNotes
 
 GOAL:
@@ -624,7 +628,7 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
             $p | Add-Member -NotePropertyName expects -NotePropertyValue "string" -Force
             $normalizedActions = $true
         }
-        if ($p.action -notmatch '^(READ_FILE|READ_PART|WRITE_FILE|APPEND_FILE|WRITE_PATCH|RUN_COMMAND|LIST_DIR|FIND_FILES|SEARCH_TEXT|FOR_EACH|BUILD_REPORT|CREATE_DIR|DELETE_FILE|DELETE_DIR|MOVE_ITEM|COPY_ITEM|RENAME_ITEM|VERIFY_PATH)\|') {
+        if ($p.action -notmatch '^(READ_FILE|READ_PART|WRITE_FILE|APPEND_FILE|WRITE_PATCH|RUN_COMMAND|LIST_DIR|FIND_FILES|SEARCH_TEXT|FOR_EACH|REPEAT|BUILD_REPORT|CREATE_DIR|DELETE_FILE|DELETE_DIR|MOVE_ITEM|COPY_ITEM|RENAME_ITEM|VERIFY_PATH)\|') {
             $allActionsValid = $false
             break
         }
@@ -644,6 +648,7 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
     }
     $pathsValid = $true
     $findGlobs = New-Object System.Collections.Generic.HashSet[string]
+    $dirLists = New-Object System.Collections.Generic.HashSet[string]
     foreach ($p in $candidate.plan) {
         if ($p.action -match '^(READ_FILE|WRITE_FILE|LIST_DIR|READ_PART|APPEND_FILE|WRITE_PATCH|SEARCH_TEXT|BUILD_REPORT|CREATE_DIR|DELETE_FILE|DELETE_DIR|MOVE_ITEM|COPY_ITEM|RENAME_ITEM|VERIFY_PATH)\|') {
             $pathIndex = 1
@@ -675,6 +680,10 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
             }
             $findGlobs.Add($glob) | Out-Null
         }
+        if ($p.action -match '^LIST_DIR\|') {
+            $dirPath = $p.action.Split('|',2)[1]
+            $dirLists.Add($dirPath) | Out-Null
+        }
         if ($p.action -match '^FOR_EACH\|') {
             $parts = $p.action.Split('|',3)
             if ($parts.Length -lt 3) {
@@ -705,6 +714,34 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
                     $pathsValid = $false
                     break
                 }
+            }
+            if ($listKey -match '^DIR:(.+)$') {
+                $dir = $matches[1]
+                if (-not $dirLists.Contains($dir)) {
+                    $pathsValid = $false
+                    break
+                }
+            }
+        }
+        if ($p.action -match '^REPEAT\|') {
+            $parts = $p.action.Split('|',3)
+            if ($parts.Length -lt 3) {
+                $pathsValid = $false
+                break
+            }
+            $count = $parts[1]
+            if ($count -notmatch '^\d+$') {
+                $pathsValid = $false
+                break
+            }
+            $tmpl = $parts[2]
+            if ($tmpl -notmatch '^(READ_FILE|READ_PART|WRITE_FILE|APPEND_FILE|WRITE_PATCH|RUN_COMMAND|LIST_DIR|SEARCH_TEXT|CREATE_DIR|DELETE_FILE|DELETE_DIR|MOVE_ITEM|COPY_ITEM|RENAME_ITEM|VERIFY_PATH)\|') {
+                $pathsValid = $false
+                break
+            }
+            if ($tmpl -notmatch '\{index\}') {
+                $pathsValid = $false
+                break
             }
         }
         if ($p.action -match '^RUN_COMMAND\|') {
@@ -771,7 +808,7 @@ if ($plan.thinking_summary) {
 }
 
 Write-Host "`nGOAL RESTATEMENT:"
-Get-GoalSummary | ForEach-Object { Write-Host $_ }
+$GoalRestatement | ForEach-Object { Write-Host $_ }
 
 if ($plan.reflection -and $plan.reflection.confidence -ne $null) {
     Write-Host "`nCONFIDENCE: $($plan.reflection.confidence)"
@@ -1254,11 +1291,32 @@ function Invoke-ForEachAction {
     }
 
     $items = $listText -split "`n" | Where-Object { $_ -and $_.Trim() -ne "" }
-    $idx = 1
+    $idx = 0
     foreach ($item in $items) {
         $action = $Template.Replace("{item}", $item).Replace("{index}", $idx)
+        $action = [regex]::Replace($action, "\{index:0+(\d+)d\}", {
+            param($m)
+            $width = [int]$m.Groups[1].Value
+            $idx.ToString(("D{0}" -f $width))
+        })
         Execute-Action -Action $action
         $idx++
+    }
+}
+
+function Invoke-RepeatAction {
+    param(
+        [int]$Count,
+        [string]$Template
+    )
+    for ($idx = 0; $idx -lt $Count; $idx++) {
+        $action = $Template.Replace("{index}", $idx)
+        $action = [regex]::Replace($action, "\{index:0+(\d+)d\}", {
+            param($m)
+            $width = [int]$m.Groups[1].Value
+            $idx.ToString(("D{0}" -f $width))
+        })
+        Execute-Action -Action $action
     }
 }
 
@@ -1337,6 +1395,13 @@ function Execute-Action {
 
     if ($Action -match '^FOR_EACH\|(.+?)\|(.+)$') {
         Invoke-ForEachAction -ListKey $matches[1] -Template $matches[2]
+        $sw.Stop()
+        Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
+        return
+    }
+
+    if ($Action -match '^REPEAT\|(\d+)\|(.+)$') {
+        Invoke-RepeatAction -Count ([int]$matches[1]) -Template $matches[2]
         $sw.Stop()
         Write-Host ("[EXEC] Done in {0:N2}s" -f $sw.Elapsed.TotalSeconds)
         return
