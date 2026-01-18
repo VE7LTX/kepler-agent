@@ -68,6 +68,7 @@ $DebugLogMaxChars = 2000
 $DebugLogFull = $true
 $DebugLogPretty = $true
 $RequireJsonTags = $true
+$EnableSpinner = $true
 $RootDir = "C:\agent\"
 
 # ------------------ GOAL ------------------
@@ -125,7 +126,7 @@ $Text
 function Get-GoalSummary {
     $promptText = Build-GoalRestatement -Text $Goal
     Log-Debug-Raw -Label "Goal restatement prompt" -Text $promptText
-    $summary = Invoke-Ollama `
+    $summary = Invoke-Ollama-Spinner `
         -Model $PlannerModel `
         -Prompt $promptText `
         -System "Return plain text only." `
@@ -133,7 +134,8 @@ function Get-GoalSummary {
             num_ctx     = $PlannerNumCtx
             num_predict = 200
             temperature = 0.1
-        }
+        } `
+        -Label "Goal summary"
     Log-Debug-Raw -Label "Goal restatement response" -Text $summary
     $summary
 }
@@ -209,6 +211,58 @@ function Invoke-Ollama {
     ).response
 }
 
+# ------------------ OLLAMA CALL (SPINNER) ------------------
+function Invoke-Ollama-Spinner {
+    param(
+        [string]$Model,
+        [string]$Prompt,
+        [string]$System,
+        [hashtable]$Options,
+        [string]$Label = "Model"
+    )
+
+    if (-not $EnableSpinner) {
+        return Invoke-Ollama -Model $Model -Prompt $Prompt -System $System -Options $Options
+    }
+
+    $job = Start-Job -ScriptBlock {
+        param($uri, $model, $prompt, $system, $options)
+        $body = @{
+            model   = $model
+            prompt  = $prompt
+            system  = $system
+            options = $options
+            stream  = $false
+        }
+        (Invoke-RestMethod `
+            -Uri $uri `
+            -Method Post `
+            -ContentType "application/json" `
+            -Body ($body | ConvertTo-Json -Depth 10) `
+            -TimeoutSec 600
+        ).response
+    } -ArgumentList $OllamaGenApi, $Model, $Prompt, $System, $Options
+
+    $frames = @("|","/","-","\\")
+    $idx = 0
+    while ($job.State -eq "Running") {
+        Write-Host -NoNewline ("`r[AGENT] {0} {1}" -f $Label, $frames[$idx % $frames.Count])
+        Start-Sleep -Milliseconds 200
+        $idx++
+    }
+    Write-Host -NoNewline ("`r[AGENT] {0} done.   " -f $Label)
+    Write-Host ""
+
+    try {
+        $result = Receive-Job -Job $job -ErrorAction Stop
+    } catch {
+        Remove-Job -Job $job -Force | Out-Null
+        throw
+    }
+    Remove-Job -Job $job -Force | Out-Null
+    $result
+}
+
 # ------------------ JSON EXTRACT ------------------
 function Extract-Json {
     param([string]$Text)
@@ -278,7 +332,7 @@ INPUT:
 $Text
 "@
     Log-Debug-Raw -Label "Repair prompt" -Text $repairPrompt
-    Invoke-Ollama `
+    Invoke-Ollama-Spinner `
         -Model $repairModel `
         -Prompt $repairPrompt `
         -System "Return ONLY <json>...</json>. Any other text is invalid." `
@@ -286,7 +340,8 @@ $Text
             num_ctx     = $PlannerNumCtx
             num_predict = $PlannerPredict
             temperature = 0.0
-        }
+        } `
+        -Label "Repair"
 }
 
 # ------------------ PATH NORMALIZE ------------------
@@ -424,7 +479,7 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
     Log-Debug-Raw -Label "Planner prompt" -Text $planPrompt
     Write-Host "[AGENT] Planner model: $PlannerModel"
     $planSw = [Diagnostics.Stopwatch]::StartNew()
-    $raw = Invoke-Ollama `
+    $raw = Invoke-Ollama-Spinner `
         -Model $PlannerModel `
         -Prompt $planPrompt `
         -System "Return ONLY <json>...</json>. Any other text is invalid." `
@@ -432,7 +487,8 @@ for ($i = 1; $i -le $EffectiveMaxIterations; $i++) {
             num_ctx     = $PlannerNumCtx
             num_predict = $PlannerPredict
             temperature = $PlannerTemp
-        }
+        } `
+        -Label "Planner"
     $planSw.Stop()
     Write-Host ("[AGENT] Planner response time: {0:N2}s" -f $planSw.Elapsed.TotalSeconds)
     Log-Debug ("Planner response time: {0:N2}s" -f $planSw.Elapsed.TotalSeconds)
@@ -743,7 +799,7 @@ function Write-File {
         } | Out-String)
     }
 
-    $content = Invoke-Ollama `
+    $content = Invoke-Ollama-Spinner `
         -Model $WriterModel `
         -System "Write ONLY the file contents described in SPEC. Do not output commands, prompts, markdown fences, or explanations." `
         -Prompt @"
@@ -761,7 +817,8 @@ $contextText
             num_ctx     = $WriterNumCtx
             num_predict = $WriterPredict
             temperature = $WriterTemp
-        }
+        } `
+        -Label "Writer"
 
     $clean = $content -replace '^\s*```.*?\n','' -replace '\n```$',''
     $clean | Out-File -FilePath $Path -Encoding utf8 -Force
