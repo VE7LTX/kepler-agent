@@ -11,7 +11,7 @@
 - Allow {item} placeholders only inside FOR_EACH templates; reject elsewhere. (done)
 - Ensure FOR_EACH list keys are created before use (FIND_FILES/LIST_DIR must appear before use). (done)
 - Normalize LIST_DIR with globs into FIND_FILES (e.g., LIST_DIR|C:\agent\*.ps1). (done)
-- Reject unknown actions (CREATE_FILE, READ_FIRST_LINES, WRITE_REPORT). (pending: add explicit unknown-action list to prompt)
+- Reject unknown actions (CREATE_FILE, READ_FIRST_LINES, WRITE_REPORT). (done: prompt includes unknown action list)
 - Ensure WRITE_FILE specs include real content (length + not placeholder). (done: EMPTY_FILE allowed)
 - Clarify WRITE_FILE content belongs in action string, not expects. (done)
 - Decide and document FOR_EACH semantics (does {item} resolve to full path or basename). (done)
@@ -28,8 +28,8 @@
 
 ## Logging / UX
 - Keep debug log readable (no blank lines between every line). (done)
-- Log planner prompts/responses and repair inputs/outputs when DebugLogFull is enabled.
-- Show model/time status for long-running planner/writer calls.
+- Log planner prompts/responses and repair inputs/outputs when DebugLogFull is enabled. (done)
+- Show model/time status for long-running planner/writer calls. (done)
 - Add approval mode to ask once per plan for yes-to-all vs step-by-step. (done)
 - If a step is declined, collect a reason and replan with that feedback. (done)
 - Add rejection subcodes in logs (PATH_TRAVERSAL, PLACEHOLDER_MISUSE, NONEXISTENT_BASE). (done)

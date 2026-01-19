@@ -189,6 +189,9 @@ You are a strict JSON plan reviewer. Provide a short, concrete diagnostic summar
 Rules:
 - No chain-of-thought.
 - Use plain text only.
+- Only reference REJECT_REASON, REJECT_DETAIL, and BAD_OUTPUT. Do not invent new requirements.
+- If REJECT_DETAIL is empty, only cite errors visible in BAD_OUTPUT.
+- Do not suggest adding tools, files, or steps unless the BAD_OUTPUT already attempted them.
 - Include sections:
   DIAGNOSIS: 2-4 bullets
   FIX_HINTS: 2-4 bullets
@@ -378,6 +381,7 @@ function Invoke-Ollama-Spinner {
         [string]$Label = "Model"
     )
     Log-Trace -Where "Invoke-Ollama-Spinner" -Message ("label='{0}' model='{1}' prompt_len={2} system_len={3} opts='{4}'" -f $Label, $Model, ($Prompt.Length), ($System.Length), ($Options | ConvertTo-Json -Compress))
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
     if (-not $EnableSpinner) {
         return Invoke-Ollama -Model $Model -Prompt $Prompt -System $System -Options $Options
@@ -417,11 +421,16 @@ function Invoke-Ollama-Spinner {
         Remove-Job -Job $job -Force | Out-Null
         $msg = $_.Exception.Message
         $script:LastModelError = $msg
+        $sw.Stop()
+        Log-Debug ("{0} response time: {1:N2}s" -f $Label, $sw.Elapsed.TotalSeconds)
         Write-Host "[AGENT] Model call failed: $msg"
         Log-Debug ("Model call failed: {0}" -f $msg)
         return $null
     }
     Remove-Job -Job $job -Force | Out-Null
+    $sw.Stop()
+    Write-Host ("[AGENT] {0} response time: {1:N2}s" -f $Label, $sw.Elapsed.TotalSeconds)
+    Log-Debug ("{0} response time: {1:N2}s" -f $Label, $sw.Elapsed.TotalSeconds)
     $result
 }
 
@@ -586,6 +595,7 @@ function Build-PlanPrompt {
         "Actions must be single-line; if content needs newlines, use \\n escapes in the spec.",
         "Each plan item must have only: step, action, expects.",
         "Allowed actions only: READ_FILE, READ_PART, WRITE_FILE, APPEND_FILE, WRITE_PATCH, RUN_COMMAND, LIST_DIR, FIND_FILES, SEARCH_TEXT, FOR_EACH, REPEAT, BUILD_REPORT, CREATE_DIR, DELETE_FILE, DELETE_DIR, MOVE_ITEM, COPY_ITEM, RENAME_ITEM, VERIFY_PATH.",
+        "Do NOT use unknown actions (e.g., CREATE_FILE, READ_FIRST_LINES, READ_LINES, WRITE_REPORT, WRITE_TEXT, EXTRACT_COMMANDS, ANALYZE_CONTENT, IMPROVE_CODE).",
         "RUN_COMMAND must include a command after the pipe (RUN_COMMAND|<command>)."
     )
 

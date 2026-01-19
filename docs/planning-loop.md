@@ -50,6 +50,7 @@ Recent failures are fed back into the next prompt. The last rejected output and 
 
 ## 6a) Failure Reflection (fast model)
 After a rejection, a fast model generates a short diagnostic with concrete fix hints. These hints are injected into the next planner prompt as `RETRY_HINTS` and are shown to the user.
+- The reflection must only reference the reject reason/detail and the bad output; it should not invent new requirements.
 
 ## 7) Approval and Execution
 Once a plan passes validation, the agent shows:
