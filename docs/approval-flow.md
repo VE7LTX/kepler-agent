@@ -21,6 +21,10 @@ This lets you refine the goal without restarting the session.
 ## Low Confidence Handling
 If the planner confidence is below the configured threshold, the agent asks for a second confirmation before executing.
 
+## Risky Actions
+When `ApprovalMode` is `step` and `ConfirmRiskyActions` is enabled, the agent prompts before actions that write, move, delete, or run commands.
+When `ApprovalMode` is `all`, per-step prompts are skipped.
+
 ## Why This Exists
 - A single plan approval reduces repetitive prompts for safe tasks.
 - Step-by-step approval helps when actions are destructive or unclear.

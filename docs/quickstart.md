@@ -62,6 +62,7 @@ The agent prints:
 - A WHO/WHAT/WHEN/WHERE/WHY goal restatement
 - Confidence
 - Per-step timing during execution
+- Model name and estimated wait time for each model call
 
 ## 7) Logs
 The debug log is written to:

@@ -48,6 +48,8 @@ A smaller model is used when reliability is better than raw size.
 ## 6) Failure Memory
 Recent failures are fed back into the next prompt. The last rejected output and the rejection reason are included to help the planner avoid repeating the same mistake.
 
+The UI also prints the last failure (reason + detail + hints) at the start of each planning iteration.
+
 ## 6a) Failure Reflection (fast model)
 After a rejection, a fast model generates a short diagnostic with concrete fix hints. These hints are injected into the next planner prompt as `RETRY_HINTS` and are shown to the user.
 - The reflection must only reference the reject reason/detail and the bad output; it should not invent new requirements.
@@ -69,7 +71,8 @@ If a step is declined, the agent asks why, saves the feedback, and replans.
 Between steps, a fast pre-check summary is shown to the user so issues can be spotted early.
 
 ## 8) Timing and Logs
-- Planner response time is printed each iteration.
+- Model name and estimated wait time are printed before each model call.
+- Model response time is printed after each model call.
 - Each action prints elapsed time.
 - Full prompts and outputs are logged to `C:\agent\agent-debug.log`.
 - Plan diffs between iterations are logged to show what changed.

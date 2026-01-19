@@ -52,6 +52,7 @@ This section lists common failures, why they happen, and what to check.
 - **Long delays**
   - Larger models can take 30-90 seconds per planning call.
   - Fix: use smaller models or reduce `PlannerPredict` in `agent.ps1`.
+  - The UI prints a rough ETA before each model call.
 
 ## Debugging Tips
 - Open `C:\agent\agent-debug.log` and look for:

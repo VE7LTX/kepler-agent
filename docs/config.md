@@ -6,8 +6,8 @@ All settings live near the top of `agent.ps1`. These control model selection, ti
 - `PlannerModel`: Default planner model used after the first pass.
 - `PlannerFirstPassModel`: First model used each run (usually the largest available).
 - `PlannerFallbacks`: Ordered list of fallback planner models and their temperatures.
-- `WriterModel`: Default writer model for `WRITE_FILE` output.
-- `WriterFallbacks`: Models used if the writer output is too short.
+- `WriterModel`: Default writer model for `WRITE_FILE` output (informational; writer uses `WriterFallbacks`).
+- `WriterFallbacks`: Models used for `WRITE_FILE` output (first success wins).
 - `GoalSummaryModel`: Fast model used to generate the WHO/WHAT/WHEN/WHERE/WHY restatement.
 - `FailureReflectModel`: Fast model used to generate retry hints after rejects.
 - `StepCheckModel`: Fast model used for pre-step checks.

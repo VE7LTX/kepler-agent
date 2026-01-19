@@ -17,6 +17,7 @@ The planner can only emit actions from a fixed list. Each action is a single-lin
   - Use PowerShell-native commands only. Unix tools (sh, bash, seq, xargs, grep, awk, sed, cut, head, tail) are blocked.
   - Avoid invented cmdlets. Use explicit PowerShell expressions for computation.
   - `RUN_COMMAND` without a command (missing `|<command>`) is invalid.
+  - Absolute paths inside the command are checked and must stay under `C:\agent\`.
 
 ## Looping and Batch Actions
 - `FOR_EACH|<list_key>|<action_template>`

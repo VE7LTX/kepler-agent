@@ -17,6 +17,8 @@ This agent splits the work into three model roles: goal restatement, planning, a
 
 The planner may switch to smaller models after repeated rejects or API errors. This is intentional: a smaller model that follows the schema is better than a larger model that fails repeatedly.
 
+The UI prints the model name and an estimated wait time before each call, plus the response time after each call.
+
 ## Writer (small-first, retry on short output)
 - Primary: `codellama:7b-instruct`
 - Fallback: `codellama:13b-instruct`
