@@ -776,7 +776,6 @@ while ($true) {
 
     $planPrompt = Build-PlanPrompt
     Log-Debug-Raw -Label "Planner prompt" -Text $planPrompt
-    Write-Host "[AGENT] Planner model: $PlannerModel"
     $planSw = [Diagnostics.Stopwatch]::StartNew()
     $raw = Invoke-Ollama-Spinner `
         -Model $PlannerModel `
@@ -789,7 +788,6 @@ while ($true) {
         } `
         -Label "Planner"
     $planSw.Stop()
-    Write-Host ("[AGENT] Planner response time: {0:N2}s" -f $planSw.Elapsed.TotalSeconds)
     Log-Debug ("Planner response time: {0:N2}s" -f $planSw.Elapsed.TotalSeconds)
     if (-not $raw) {
         Write-Host "[AGENT] Reject: planner call failed"
