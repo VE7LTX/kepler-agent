@@ -1,9 +1,9 @@
 ﻿# TODO
 
 ## Planning / JSON
-- Enforce strict <json>...</json> output with no extra text or markdown fences.
-- Strip/repair malformed JSON and feed rejected output + reason into the next prompt.
-- Require plan items to include only step/action/expects keys.
+- Enforce strict <json>...</json> output with no extra text or markdown fences. (done)
+- Strip/repair malformed JSON and feed rejected output + reason into the next prompt. (done)
+- Require plan items to include only step/action/expects keys. (done)
 - Add explicit negative constraints to planner prompt (e.g., no FOR_EACH for creation, no parent traversal, no create+discover combo). (done)
 
 ## Actions / Validation
@@ -23,7 +23,7 @@
 - FOR_EACH should work on DIR: or FIND: lists with clean item values. (done)
 
 ## Paths
-- Paths must be absolute under C:\agent\; no unix paths.
+- Paths must be absolute under C:\agent\; no unix paths. (done)
 - Ensure list outputs (DIR/FIND) are consistent (full paths vs names) to build correct file paths. (done)
 
 ## Logging / UX
