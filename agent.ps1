@@ -1159,10 +1159,13 @@ while ($true) {
             $absPaths = [regex]::Matches($cmd, '[A-Za-z]:\\[^"\\s]+')
             foreach ($m in $absPaths) {
                 $candidatePath = $m.Value.TrimEnd(')',']','}',';',',','.')
-                if ($RequireRootPath -and ($candidatePath -notmatch ('^(?i)' + [regex]::Escape($RequireRootPath)))) {
-                    $pathsValid = $false
-                    $pathRejectDetail = "RUN_COMMAND_OUTSIDE_ROOT: absolute path must stay under $RequireRootPath."
-                    break
+                if ($RequireRootPath) {
+                    if (-not $candidatePath.StartsWith($RequireRootPath, [StringComparison]::OrdinalIgnoreCase)) {
+                        $pathsValid = $false
+                        $pathRejectDetail = "RUN_COMMAND_OUTSIDE_ROOT: absolute path must stay under $RequireRootPath."
+                        Log-Debug ("RUN_COMMAND_OUTSIDE_ROOT path='{0}' root='{1}'" -f $candidatePath, $RequireRootPath)
+                        break
+                    }
                 }
             }
             if (-not $pathsValid) { break }
