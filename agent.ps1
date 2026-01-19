@@ -215,6 +215,7 @@ function Get-GoalSummary {
     $promptText = Build-GoalRestatement -Text $Goal
     Log-Debug-Raw -Label "Goal restatement prompt" -Text $promptText
     if (Get-Command Invoke-Ollama-Spinner -ErrorAction SilentlyContinue) {
+        $script:LastGoalSummaryModel = $GoalSummaryModel
         $summary = Invoke-Ollama-Spinner `
             -Model $GoalSummaryModel `
             -Prompt $promptText `
@@ -226,6 +227,7 @@ function Get-GoalSummary {
             } `
             -Label "Goal summary"
     } else {
+        $script:LastGoalSummaryModel = $GoalSummaryModel
         $body = @{
             model   = $GoalSummaryModel
             prompt  = $promptText
@@ -258,6 +260,7 @@ function Get-FailureReflection {
     if (-not $EnableFailureReflection) { return $null }
     $promptText = Build-FailureReflectPrompt -Reason $Reason -Detail $Detail -BadOutput $BadOutput
     Log-Debug-Raw -Label "Failure reflection prompt" -Text $promptText
+    $script:LastFailureReflectionModel = $FailureReflectModel
     $response = Invoke-Ollama-Spinner `
         -Model $FailureReflectModel `
         -Prompt $promptText `
@@ -270,7 +273,7 @@ function Get-FailureReflection {
         -Label "Failure reflection"
     if ($response) {
         Log-Debug-Raw -Label "Failure reflection response" -Text $response
-        Write-Host "[AGENT] Failure reflection:"
+        Write-Host ("[AGENT] Failure reflection (model: {0}):" -f $script:LastFailureReflectionModel)
         $response | ForEach-Object { Write-Host $_ }
         return $response
     }
@@ -1188,6 +1191,8 @@ if ($plan.thinking_summary) {
 }
 
 Write-Host "`nGOAL RESTATEMENT:"
+$goalModelLabel = if ($script:LastGoalSummaryModel) { $script:LastGoalSummaryModel } else { "unknown" }
+Write-Host ("[AGENT] Goal restatement model: {0}" -f $goalModelLabel)
 $GoalRestatement | ForEach-Object { Write-Host $_ }
 
 if ($plan.reflection -and $plan.reflection.confidence -ne $null) {
@@ -1781,6 +1786,7 @@ NEXT_ACTION:
 $Action
 "@
         Log-Debug-Raw -Label "Step check prompt" -Text $checkPrompt
+        $script:LastStepCheckModel = $StepCheckModel
         $check = Invoke-Ollama-Spinner `
             -Model $StepCheckModel `
             -Prompt $checkPrompt `
@@ -1793,7 +1799,7 @@ $Action
             -Label "Step check"
         if ($check) {
             Log-Debug-Raw -Label "Step check response" -Text $check
-            Write-Host "[AGENT] Step check:"
+            Write-Host ("[AGENT] Step check (model: {0}):" -f $script:LastStepCheckModel)
             $check | ForEach-Object { Write-Host $_ }
         }
     }
