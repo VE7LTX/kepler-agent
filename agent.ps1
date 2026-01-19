@@ -374,6 +374,31 @@ function Invoke-Ollama {
     ).response
 }
 
+# ------------------ MODEL ETA ------------------
+function Get-ModelEtaSeconds {
+    param(
+        [string]$Model,
+        [hashtable]$Options
+    )
+    if (-not $Model) { return 0 }
+    $m = $Model.ToLowerInvariant()
+    $base = 30
+    if ($m -match 'phi3') { $base = 8 }
+    elseif ($m -match 'qwen2') { $base = 35 }
+    elseif ($m -match 'mistral') { $base = 40 }
+    elseif ($m -match 'deepseek') { $base = 55 }
+    elseif ($m -match 'codellama:13b') { $base = 120 }
+    elseif ($m -match 'codellama:7b') { $base = 45 }
+    $predict = 0
+    if ($Options -and $Options.ContainsKey("num_predict")) {
+        $predict = [int]$Options.num_predict
+    }
+    if ($predict -gt 0) {
+        $base += [int][Math]::Ceiling($predict / 200)
+    }
+    return $base
+}
+
 # ------------------ OLLAMA CALL (SPINNER) ------------------
 function Invoke-Ollama-Spinner {
     param(
@@ -384,6 +409,12 @@ function Invoke-Ollama-Spinner {
         [string]$Label = "Model"
     )
     Log-Trace -Where "Invoke-Ollama-Spinner" -Message ("label='{0}' model='{1}' prompt_len={2} system_len={3} opts='{4}'" -f $Label, $Model, ($Prompt.Length), ($System.Length), ($Options | ConvertTo-Json -Compress))
+    $eta = Get-ModelEtaSeconds -Model $Model -Options $Options
+    if ($eta -gt 0) {
+        Write-Host ("[AGENT] {0} model: {1} (est ~{2}s)" -f $Label, $Model, $eta)
+    } else {
+        Write-Host ("[AGENT] {0} model: {1}" -f $Label, $Model)
+    }
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
     if (-not $EnableSpinner) {
@@ -719,6 +750,16 @@ while ($true) {
     Write-Host "`n[AGENT] Planning iteration $i..."
     Log-Debug "Planning iteration $i"
     Log-Debug "-----"
+    if ($script:LastRejectReason) {
+        Write-Host ("[AGENT] Last failure: {0}" -f $script:LastRejectReason)
+        if ($script:LastRejectDetail) {
+            Write-Host ("[AGENT] Last failure detail: {0}" -f $script:LastRejectDetail)
+        }
+        if ($FailureHints) {
+            Write-Host "[AGENT] Last failure hints:"
+            $FailureHints | ForEach-Object { Write-Host $_ }
+        }
+    }
 
     if ($i -eq 1 -and $PlannerFirstPassModel) {
         $PlannerModel = $PlannerFirstPassModel
