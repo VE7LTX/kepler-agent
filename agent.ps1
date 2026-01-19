@@ -1148,7 +1148,7 @@ while ($true) {
                 break
             }
             $spec = $parts[2].Trim()
-            $specTrim = $spec.Trim("'\"")
+            $specTrim = $spec.Trim("'`"")
             if ($specTrim -ieq "EMPTY_FILE") { continue }
             if ($spec.Length -lt 10 -or $spec -match '(?i)\btext/plain\b|<spec>|<content>|<file>') {
                 $writeSpecsValid = $false
