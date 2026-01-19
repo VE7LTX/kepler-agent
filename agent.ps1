@@ -432,6 +432,7 @@ function Invoke-Ollama-Spinner {
     }
     Remove-Job -Job $job -Force | Out-Null
     $sw.Stop()
+    Write-Host ("[AGENT] {0} model: {1}" -f $Label, $Model)
     Write-Host ("[AGENT] {0} response time: {1:N2}s" -f $Label, $sw.Elapsed.TotalSeconds)
     Log-Debug ("{0} response time: {1:N2}s" -f $Label, $sw.Elapsed.TotalSeconds)
     $result
@@ -1260,6 +1261,7 @@ function Write-File {
     if ($specTrim -ieq "EMPTY_FILE") {
         Log-Trace -Where "Write-File" -Message "EMPTY_FILE spec detected; writing empty file."
         New-Item -ItemType File -Path $Path -Force | Out-Null
+        Write-Host "[AGENT] Writer model: none (EMPTY_FILE)"
         return
     }
 
@@ -1275,6 +1277,7 @@ function Write-File {
     }
 
     $content = $null
+    $script:LastWriterModel = $null
     foreach ($wm in $WriterFallbacks) {
         $content = Invoke-Ollama-Spinner `
             -Model $wm `
@@ -1298,6 +1301,7 @@ $contextText
             -Label "Writer"
 
         if ($content -and $content.Trim().Length -ge 10) {
+            $script:LastWriterModel = $wm
             break
         }
     }
@@ -1305,6 +1309,9 @@ $contextText
     $clean = $content -replace '^\s*```.*?\n','' -replace '\n```$',''
     $clean | Out-File -FilePath $Path -Encoding utf8 -Force
 
+    if ($script:LastWriterModel) {
+        Write-Host ("[AGENT] Writer model: {0}" -f $script:LastWriterModel)
+    }
     Write-Host "[WRITER] Wrote $Path"
 }
 
