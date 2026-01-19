@@ -1157,6 +1157,9 @@ while ($true) {
                 }
             }
             $absPaths = [regex]::Matches($cmd, '[A-Za-z]:\\[^"\\s]+')
+            if ($absPaths.Count -eq 0) {
+                Log-Debug ("RUN_COMMAND paths: none detected in '{0}'" -f $cmd)
+            }
             foreach ($m in $absPaths) {
                 $candidatePath = $m.Value.TrimEnd(')',']','}',';',',','.')
                 if ($RequireRootPath) {
@@ -1167,6 +1170,7 @@ while ($true) {
                         break
                     }
                 }
+                Log-Debug ("RUN_COMMAND path ok: {0}" -f $candidatePath)
             }
             if (-not $pathsValid) { break }
         }
